@@ -10,6 +10,7 @@
 #include <stdint.h>
 //#include <pthread.h>
 #include <assert.h>
+#include <cutil.h>
 
 //#include "parsec_barrier.hpp"
 
@@ -109,27 +110,35 @@ float densityCoeff, pressureCoeff, viscosityCoeff;
 int nx, ny, nz;			// number of grid cells in each dimension
 Vec3 delta;				// cell dimensions
 int origNumParticles = 0;
+
 int numParticles = 0;
 int numCells = 0;
+
+//device memory
 Cell *cells = 0;
-Cell *cells2 = 0;
 int *cnumPars = 0;
+
+Cell *cells2 = 0;
 int *cnumPars2 = 0;
+
+//host memory
+Cell *h_cells2 = 0;
+int *h_cnumPars2 = 0;
+
+//bool *border;			// flags which cells lie on grid boundaries
 
 int XDIVS = 1;	// number of partitions in X
 int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
+/*
 struct Grid
 {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-
-
-#error border must go directly to device with cudamalloc()
-bool *border;			// flags which cells lie on grid boundaries
+*/
 
 //pthread_attr_t attr;
 //pthread_t *thread;
@@ -162,8 +171,8 @@ unsigned int hmgweight(unsigned int x, int *lsb) {
 
     *lsb=-1;
     while(x > 0) {
-        unsigned int temp;
-        temp=(x&mask);
+        //unsigned int temp;
+        //temp=(x&mask);
         if ((x&mask) == 1) {
             weight++;
             if (*lsb == -1) *lsb = count;
@@ -175,19 +184,17 @@ unsigned int hmgweight(unsigned int x, int *lsb) {
     return weight;
 }
 
-//void InitSim(char const *fileName, unsigned int threadnum) {
-void InitSim(char const *fileName) {
+void InitSim(char const *fileName, unsigned int threadnum) {
     //Compute partitioning based on square root of number of threads
     //NOTE: Other partition sizes are possible as long as XDIVS * ZDIVS == threadnum,
     //      but communication is minimal (and hence optimal) if XDIVS == ZDIVS
+
     int lsb;
 
-    /*
     if (hmgweight(threadnum,&lsb) != 1) {
         std::cerr << "Number of threads must be a power of 2" << std::endl;
         exit(1);
     }
-    */
 
     XDIVS = 1<<(lsb/2);
     ZDIVS = 1<<(lsb/2);
@@ -198,7 +205,7 @@ void InitSim(char const *fileName) {
     */
 
     //    thread = new pthread_t[NUM_GRIDS];
-    grids = new struct Grid[NUM_GRIDS];
+    //    grids = new struct Grid[NUM_GRIDS];
 
     //Load input particles
     std::cout << "Loading file \"" << fileName << "\"..." << std::endl;
@@ -215,29 +222,34 @@ void InitSim(char const *fileName) {
 
     h = kernelRadiusMultiplier / restParticlesPerMeter;
     hSq = h*h;
+
     const float pi = 3.14159265358979f;
+
     float coeff1 = 315.f / (64.f*pi*pow(h,9.f));
     float coeff2 = 15.f / (pi*pow(h,6.f));
     float coeff3 = 45.f / (pi*pow(h,6.f));
     float particleMass = 0.5f*doubleRestDensity / (restParticlesPerMeter*restParticlesPerMeter*restParticlesPerMeter);
+
     densityCoeff = particleMass * coeff1;
     pressureCoeff = 3.f*coeff2 * 0.5f*stiffness * particleMass;
     viscosityCoeff = viscosity * coeff3 * particleMass;
 
     Vec3 range = domainMax - domainMin;
+
     nx = (int)(range.x / h);
     ny = (int)(range.y / h);
     nz = (int)(range.z / h);
+
     assert(nx >= 1 && ny >= 1 && nz >= 1);
+
     numCells = nx*ny*nz;
     std::cout << "Number of cells: " << numCells << std::endl;
 
-    //3D integer version of variable 'h'
     delta.x = range.x / nx;
     delta.y = range.y / ny;
     delta.z = range.z / nz;
-    assert(delta.x >= h && delta.y >= h && delta.z >= h);
 
+    assert(delta.x >= h && delta.y >= h && delta.z >= h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
     /* this determines the size of the grid (in gpu world these are the blocks)
@@ -277,7 +289,7 @@ void InitSim(char const *fileName) {
     /* we do not need to keep information about the borders anymore,
      * every block in the GPU knows its limits from the builtin
      * variables (blockIdx, threadIdx, etc.)
-     */
+
 
     border = new bool[numCells];
     for (int i = 0; i < NUM_GRIDS; ++i)
@@ -305,6 +317,7 @@ void InitSim(char const *fileName) {
                                             border[index] = true;
                                     }
                     }
+    */
 
     /*
     pthread_attr_init(&attr);
@@ -321,18 +334,23 @@ void InitSim(char const *fileName) {
     pthread_barrier_init(&barrier, NULL, NUM_GRIDS);
     */
 
-#error we need to declare device variables respectively, may be the init() will be done in the device directly
-    //these must go directly to the device with cudamalloc()
-    cells = new Cell[numCells];
-    cnumPars = new int[numCells];
+    //cells = new Cell[numCells];
+    //cnumPars = new int[numCells];
+
+    cudaMalloc((void**)&cells, numCells * sizeof(struct Cell));
+    cudaMalloc((void**)&cnumPars, numCells * sizeof(int));
+
+    cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell));
+    cudaMalloc((void**)&cnumPars2, numCells * sizeof(int));
 
     //these should be tranfered to device after initialisation
-    cells2 = new Cell[numCells];
-    cnumPars2 = new int[numCells];
+    h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
+    h_cnumPars2 = (int*)calloc(numCells,sizeof(int));  //new int[numCells];
 
-    assert(cells && cells2 && cnumPars && cnumPars2);
+    assert(cells && cells2 && cnumPars && cnumPars2 && h_cells2 && h_cnumPars2);
 
-    memset(cnumPars2, 0, numCells*sizeof(int));
+    //we used calloc instead
+    //memset(cnumPars2, 0, numCells*sizeof(int));
 
     float px, py, pz, hvx, hvy, hvz, vx, vy, vz;
     for (int i = 0; i < origNumParticles; ++i)
@@ -367,9 +385,9 @@ void InitSim(char const *fileName) {
             if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
 
             int index = (ck*ny + cj)*nx + ci;
-            Cell &cell = cells2[index];
+            Cell &cell = h_cells2[index];
 
-            int np = cnumPars2[index];
+            int np = h_cnumPars2[index];
             if (np < 16)
 		{
                     cell.p[np].x = px;
@@ -381,11 +399,12 @@ void InitSim(char const *fileName) {
                     cell.v[np].x = vx;
                     cell.v[np].y = vy;
                     cell.v[np].z = vz;
-                    ++cnumPars2[index];
+                    ++h_cnumPars2[index];
 		}
             else
                 --numParticles;
 	}
+
     std::cout << "Number of particles: " << numParticles << " (" << origNumParticles-numParticles << " skipped)" << std::endl;
 }
 
@@ -414,8 +433,9 @@ void SaveFile(char const *fileName)
     int count = 0;
     for (int i = 0; i < numCells; ++i)
 	{
-            Cell const &cell = cells[i];
-            int np = cnumPars[i];
+#warning reminder: we use the same host buffer for input and output
+            Cell const &cell = h_cells2[i];
+            int np = h_cnumPars2[i];
             for (int j = 0; j < np; ++j)
 		{
                     if (!isLittleEndian()) {
@@ -494,19 +514,33 @@ void CleanUpSim()
     delete[] mutex;
     */
 
-#error use cudafree() here
-    delete[] border;
-    delete[] cells;
-    delete[] cnumPars;
+    //delete[] border;
+    //delete[] cells;
+    //delete[] cnumPars;
 
+    //free host memory
+    free(h_cells2);
+    free(h_cnumPars2);
 
-    delete[] cells2;
-    delete[] cnumPars2;
-    //    delete[] thread;
-    delete[] grids;
+    //free device memory
+    cudaFree(cells);
+    cudaFree(cnumPars);
+
+    cudaFree(cells2);
+    cudaFree(cnumPars2);
+
+    //delete[] cells2;
+    //delete[] cnumPars2;
+    //delete[] thread;
+    //delete[] grids;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+#define BLOCK_BORDER_X(ix) ((ix != 0) && (ix % blockDim.x == 0))
+#define BLOCK_BORDER_Y(iy) ((iy != 0) && (iy % blockDim.y == 0))
+#define BLOCK_BORDER_Z(iz) ((iz != 0) && (iz % blockDim.z == 0))
+
+#define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || BLOCK_BORDER_Y(iy) || BLOCK_BORDER_Z(iz))
 
 __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
     int numNeighCells = 0;
@@ -522,11 +556,16 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
                         {
                             int index = (kk*ny + jj)*nx + ii;
 
-                            //remember only cell neighbors who acltually have particles
+                            //consider only cell neighbors who acltually have particles
 
                             if (cnumPars[index] != 0)
                                 {
-                                    neighCells[numNeighCells] = index;
+                                    if (IS_BORDER(ci,cj,ck)) {
+                                        //pass negative value to determine the borders
+                                        neighCells[numNeighCells] = -index;
+                                    } else {
+                                        neighCells[numNeighCells] = index;
+                                    }
                                     ++numNeighCells;
                                 }
                         }
@@ -537,7 +576,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ big_kernel() {
+__global__ void big_kernel() {
 
     int ix;
     int iy;
@@ -620,7 +659,11 @@ __global__ big_kernel() {
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
         int np_renamed;
-        if (border[index2]) {
+
+        //use macro
+        //if (border[index2]) {
+
+        if (IS_BORDER(ck,cj,ci)) {
             pthread_mutex_lock(&mutex[index2][0]);
             np_renamed = cnumPars[index2]++;
             pthread_mutex_unlock(&mutex[index2][0]);
@@ -726,7 +769,8 @@ __global__ big_kernel() {
                         float t = hSq - distSq;
                         float tc = t*t*t;
 
-                        if (border[index]) {
+                        //if (border[index]) {
+                        if (IS_BORDER(ix,iy,iz)) {
                             pthread_mutex_lock(&mutex[index][j]);
                             cell.density[j] += tc;
                             pthread_mutex_unlock(&mutex[index][j]);
@@ -734,10 +778,12 @@ __global__ big_kernel() {
                             cell.density[j] += tc;
                         }
 
-                        if (border[indexNeigh]) {
-                            pthread_mutex_lock(&mutex[indexNeigh][iparNeigh]);
+                        //if indexNeigh < 0 , cell is border
+                        //if (border[indexNeigh]) {
+                        if (indexNeigh<0) {
+                            pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
                             neigh.density[iparNeigh] += tc;
-                            pthread_mutex_unlock(&mutex[indexNeigh][iparNeigh]);
+                            pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
                         } else {
                             neigh.density[iparNeigh] += tc;
                         }
@@ -834,7 +880,8 @@ __global__ big_kernel() {
                         acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
                         acc /= cell.density[j] * neigh.density[iparNeigh];
 
-                        if (border[index]) {
+                        //if (border[index]) {
+                        if (IS_BORDER(ix,iy,iz)) {
                             pthread_mutex_lock(&mutex[index][j]);
                             cell.a[j] += acc;
                             pthread_mutex_unlock(&mutex[index][j]);
@@ -842,10 +889,12 @@ __global__ big_kernel() {
                             cell.a[j] += acc;
                         }
 
-                        if (border[indexNeigh]) {
-                            pthread_mutex_lock(&mutex[indexNeigh][iparNeigh]);
+                        //if indexNeigh < 0 , cell is border
+                        //if (border[indexNeigh]) {
+                        if (indexNeigh<0) {
+                            pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
                             neigh.a[iparNeigh] -= acc;
-                            pthread_mutex_unlock(&mutex[indexNeigh][iparNeigh]);
+                            pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
                         } else {
                             neigh.a[iparNeigh] -= acc;
                         }
@@ -966,7 +1015,8 @@ __global__ big_kernel() {
 
 } //close big_kernel()
 
-void AdvanceFrameMT(int i) {
+//void AdvanceFrameMT(int i) {
+void AdvanceFrameMT() {
 
     //common loops in all functions
 
@@ -1002,7 +1052,7 @@ void AdvanceFrameMT(int i) {
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
-    big_kernel<<<grid,block>>>(i);
+    big_kernel<<<grid,block>>>();
 
     //ClearParticlesMT(i);          pthread_barrier_wait(&barrier);
     //RebuildGridMT(i);             pthread_barrier_wait(&barrier);
@@ -1040,39 +1090,28 @@ int main(int argc, char *argv[]) {
     __parsec_bench_begin(__parsec_fluidanimate);
 #endif
 
-    /*
     if (argc < 4 || argc >= 6)
 	{
             std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
             return -1;
 	}
-    */
 
-    if (argc < 3 || argc > 4) {
-            std::cout << "Usage: " << argv[0] << " <framenum> <.fluid input file> [.fluid output file]" << std::endl;
-            return -1;
-	}
-
-    //    int threadnum = atoi(argv[1]);
-    //    int framenum = atoi(argv[2]);
-
-    int framenum = atoi(argv[1]);
+    int threadnum = atoi(argv[1]);
+    int framenum = atoi(argv[2]);
 
     //Check arguments
 
-    /*
     if (threadnum < 1) {
         std::cerr << "<threadnum> must at least be 1" << std::endl;
         return -1;
     }
-    */
 
     if (framenum < 1) {
         std::cerr << "<framenum> must at least be 1" << std::endl;
         return -1;
     }
 
-    InitSim(argv[2], threadnum);
+    InitSim(argv[3], threadnum);
 
     //    thread_args targs[threadnum];
 #ifdef ENABLE_PARSEC_HOOKS
@@ -1090,17 +1129,26 @@ int main(int argc, char *argv[]) {
     */
 
 
+    //move data to device
+    cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice);
+    cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice);
+
+
     //cuda wrapper
     AdvanceFramesMT(framenum);
 
+    //move data to host
+    /*** ATTENTION !!! we use the same host buffer ***/
+    cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost);
 
 
 #ifdef ENABLE_PARSEC_HOOKS
     __parsec_roi_end();
 #endif
 
-    if (argc > 3)
-        SaveFile(argv[3]);
+    if (argc > 4)
+        SaveFile(argv[4]);
 
     CleanUpSim();
 
