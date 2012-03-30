@@ -932,9 +932,12 @@ __global__ void big_kernel() {
                             //this works because no one reads these values at the moment ??
 
                             //#warning uncomment me
-                            atomicSub(&neigh.a[iparNeigh].x,acc.x);
-                            atomicSub(&neigh.a[iparNeigh].y,acc.y);
-                            atomicSub(&neigh.a[iparNeigh].z,acc.z);
+                            //atomicSub(&neigh.a[iparNeigh].x,acc.x);
+                            //atomicSub(&neigh.a[iparNeigh].y,acc.y);
+                            //atomicSub(&neigh.a[iparNeigh].z,acc.z);
+                            atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
+                            atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
+                            atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
                         } else {
                             neigh.a[iparNeigh] -= acc;
                         }
