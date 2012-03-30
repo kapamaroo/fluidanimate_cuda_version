@@ -57,25 +57,25 @@ class Vec3
  public:
     float x, y, z;
 
-    Vec3() {}
- Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+__device__    Vec3() {}
+__device__ Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 
-    float   GetLengthSq() const         { return x*x + y*y + z*z; }
-    float   GetLength() const           { return sqrtf(GetLengthSq()); }
-    Vec3 &  Normalize()                 { return *this /= GetLength(); }
+__device__    float   GetLengthSq() const         { return x*x + y*y + z*z; }
+__device__    float   GetLength() const           { return sqrtf(GetLengthSq()); }
+__device__    Vec3 &  Normalize()                 { return *this /= GetLength(); }
 
-    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
-    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
-    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
-    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
+__device__    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
+__device__    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
+__device__    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
+__device__    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
 
-    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
-    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
-    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
-    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
-    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
+__device__    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
+__device__    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
+__device__    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
+__device__    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
+__device__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
 
-    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
+__device__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -95,31 +95,45 @@ struct Cell
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const float timeStep = 0.005f;
-const float doubleRestDensity = 2000.f;
-const float kernelRadiusMultiplier = 1.695f;
-const float stiffness = 1.5f;
-const float viscosity = 0.4f;
+__device__ const float timeStep = 0.005f;
+__device__ const float doubleRestDensity = 2000.f;
+__device__ const float kernelRadiusMultiplier = 1.695f;
+__device__ const float stiffness = 1.5f;
+__device__ const float viscosity = 0.4f;
 const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
 const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
-float restParticlesPerMeter, h, hSq;
-float densityCoeff, pressureCoeff, viscosityCoeff;
+//device constants
+const float externalAcceleration_x = 0.f;
+const float externalAcceleration_y = -9.8f;
+const float externalAcceleration_z = 0.f;
 
-int nx, ny, nz;			// number of grid cells in each dimension
-Vec3 delta;				// cell dimensions
-int origNumParticles = 0;
+const float domainMin_x = -0.065f;
+const float domainMin_y = -0.08f;
+const float domainMin_z = -0.065f;
 
-int numParticles = 0;
-int numCells = 0;
+const float domainMax_x = 0.065f;
+const float domainMax_y = 0.1f;
+const float domainMax_z = 0.065f;
+
+
+__device__ float restParticlesPerMeter, h, hSq;
+__device__ float densityCoeff, pressureCoeff, viscosityCoeff;
+
+__device__ int nx, ny, nz;			// number of grid cells in each dimension
+__device__ Vec3 delta;				// cell dimensions
+__device__ int origNumParticles = 0;
+
+__device__ int numParticles = 0;
+__device__ int numCells = 0;
 
 //device memory
-Cell *cells = 0;
-int *cnumPars = 0;
+__device__ Cell *cells = 0;
+__device__ int *cnumPars = 0;
 
-Cell *cells2 = 0;
-int *cnumPars2 = 0;
+__device__ Cell *cells2 = 0;
+__device__ int *cnumPars2 = 0;
 
 //host memory
 Cell *h_cells2 = 0;
@@ -648,9 +662,9 @@ __global__ void big_kernel() {
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int ci = (int)((cell2.p[j].x - domainMin.x) / delta.x);
-        int cj = (int)((cell2.p[j].y - domainMin.y) / delta.y);
-        int ck = (int)((cell2.p[j].z - domainMin.z) / delta.z);
+        int ci = (int)((cell2.p[j].x - domainMin_x) / delta.x);
+        int cj = (int)((cell2.p[j].y - domainMin_y) / delta.y);
+        int ck = (int)((cell2.p[j].z - domainMin_z) / delta.z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -664,9 +678,12 @@ __global__ void big_kernel() {
         //if (border[index2]) {
 
         if (IS_BORDER(ck,cj,ci)) {
-            pthread_mutex_lock(&mutex[index2][0]);
-            np_renamed = cnumPars[index2]++;
-            pthread_mutex_unlock(&mutex[index2][0]);
+            //pthread_mutex_lock(&mutex[index2][0]);
+            //np_renamed = cnumPars[index2]++;
+            //pthread_mutex_unlock(&mutex[index2][0]);
+
+            //use atomic
+            atomicAdd(&cnumPars[index2],1);
         } else {
             np_renamed = cnumPars[index2]++;
         }
@@ -718,7 +735,9 @@ __global__ void big_kernel() {
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] = 0.f;
-        cell.a[j] = externalAcceleration;
+        cell.a[j].x = externalAcceleration_x;
+        cell.a[j].y = externalAcceleration_y;
+        cell.a[j].z = externalAcceleration_z;
     }
 
 
@@ -771,9 +790,12 @@ __global__ void big_kernel() {
 
                         //if (border[index]) {
                         if (IS_BORDER(ix,iy,iz)) {
-                            pthread_mutex_lock(&mutex[index][j]);
-                            cell.density[j] += tc;
-                            pthread_mutex_unlock(&mutex[index][j]);
+                            //pthread_mutex_lock(&mutex[index][j]);
+                            //cell.density[j] += tc;
+                            //pthread_mutex_unlock(&mutex[index][j]);
+
+                            //use atomic
+                            atomicAdd(&cell.density[j],tc);
                         } else {
                             cell.density[j] += tc;
                         }
@@ -781,9 +803,12 @@ __global__ void big_kernel() {
                         //if indexNeigh < 0 , cell is border
                         //if (border[indexNeigh]) {
                         if (indexNeigh<0) {
-                            pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            neigh.density[iparNeigh] += tc;
-                            pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
+                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
+                            //neigh.density[iparNeigh] += tc;
+                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
+
+                            //use atomic
+                            atomicAdd(&neigh.density[iparNeigh],tc);
                         } else {
                             neigh.density[iparNeigh] += tc;
                         }
@@ -871,7 +896,8 @@ __global__ void big_kernel() {
                     Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
                     float distSq = disp.GetLengthSq();
                     if (distSq < hSq) {
-                        float dist = sqrtf(std::max(distSq, 1e-12f));
+                        //float dist = sqrtf(std::max(distSq, 1e-12f));
+                        float dist = sqrtf(fmax(distSq, 1e-12f));
                         float hmr = h - dist;
 
                         Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) *
@@ -882,9 +908,15 @@ __global__ void big_kernel() {
 
                         //if (border[index]) {
                         if (IS_BORDER(ix,iy,iz)) {
-                            pthread_mutex_lock(&mutex[index][j]);
-                            cell.a[j] += acc;
-                            pthread_mutex_unlock(&mutex[index][j]);
+                            //pthread_mutex_lock(&mutex[index][j]);
+                            //cell.a[j] += acc;
+                            //pthread_mutex_unlock(&mutex[index][j]);
+
+                            //use atomics
+                            //this works because no one reads these values at the moment ??
+                            atomicAdd(&cell.a[j].x,acc.x);
+                            atomicAdd(&cell.a[j].y,acc.y);
+                            atomicAdd(&cell.a[j].z,acc.z);
                         } else {
                             cell.a[j] += acc;
                         }
@@ -892,9 +924,17 @@ __global__ void big_kernel() {
                         //if indexNeigh < 0 , cell is border
                         //if (border[indexNeigh]) {
                         if (indexNeigh<0) {
-                            pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            neigh.a[iparNeigh] -= acc;
-                            pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
+                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
+                            //neigh.a[iparNeigh] -= acc;
+                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
+
+                            //use atomics
+                            //this works because no one reads these values at the moment ??
+
+                            //#warning uncomment me
+                            atomicSub(&neigh.a[iparNeigh].x,acc.x);
+                            atomicSub(&neigh.a[iparNeigh].y,acc.y);
+                            atomicSub(&neigh.a[iparNeigh].z,acc.z);
                         } else {
                             neigh.a[iparNeigh] -= acc;
                         }
@@ -937,27 +977,27 @@ __global__ void big_kernel() {
     for (int j = 0; j < np; ++j) {
         Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
 
-        float diff = parSize - (pos.x - domainMin.x);
+        float diff = parSize - (pos.x - domainMin_x);
         if (diff > epsilon)
             cell.a[j].x += stiffness*diff - damping*cell.v[j].x;
 
-        diff = parSize - (domainMax.x - pos.x);
+        diff = parSize - (domainMax_x - pos.x);
         if (diff > epsilon)
             cell.a[j].x -= stiffness*diff + damping*cell.v[j].x;
 
-        diff = parSize - (pos.y - domainMin.y);
+        diff = parSize - (pos.y - domainMin_y);
         if (diff > epsilon)
             cell.a[j].y += stiffness*diff - damping*cell.v[j].y;
 
-        diff = parSize - (domainMax.y - pos.y);
+        diff = parSize - (domainMax_y - pos.y);
         if (diff > epsilon)
             cell.a[j].y -= stiffness*diff + damping*cell.v[j].y;
 
-        diff = parSize - (pos.z - domainMin.z);
+        diff = parSize - (pos.z - domainMin_z);
         if (diff > epsilon)
             cell.a[j].z += stiffness*diff - damping*cell.v[j].z;
 
-        diff = parSize - (domainMax.z - pos.z);
+        diff = parSize - (domainMax_z - pos.z);
         if (diff > epsilon)
             cell.a[j].z -= stiffness*diff + damping*cell.v[j].z;
     }
