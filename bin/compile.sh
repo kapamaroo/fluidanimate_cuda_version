@@ -2,14 +2,23 @@
 
 CC="g++"
 
-if [ `which my_nvcc.sh` ]; then
-    NVCC="my_nvcc.sh"
+if [ `which my_nvcc` ]; then
+    NVCC="my_nvcc"
     NVCCFLAGS=""
     echo "my_nvcc.sh found, use that"
 else
     NVCC="nvcc"
 
-    SDK_HOME="/opt/NVIDIA_GPU_Computing_SDK"
+    case $HOSTNAME in
+        blacksunhat)
+            #my machine
+            SDK_PATH="/opt"
+            ;;
+        *)
+            SDK_PATH="~"
+    esac
+
+    SDK_HOME="$SDK_PATH/NVIDIA_GPU_Computing_SDK"
 
     ARCH="`uname -i`"
 
