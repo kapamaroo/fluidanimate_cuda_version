@@ -12,8 +12,6 @@
 #include <assert.h>
 #include <cutil.h>
 
-#include "util/cuPrintf.cu"
-
 //#include "parsec_barrier.hpp"
 
 #ifdef ENABLE_PARSEC_HOOKS
@@ -646,9 +644,9 @@ __global__ void big_kernel() {
     iy = blockIdx.y * blockDim.y + threadIdx.y;
     iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    cuPrintf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
-    cuPrintf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
-    cuPrintf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
+    printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
+    printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
+    printf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
 
     //move common declarations on top
 
@@ -1146,17 +1144,8 @@ void AdvanceFrameMT() {
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
-    // initialize cuPrintf
-    cudaPrintfInit();
-
     big_kernel<<<grid,block>>>();
-    //cudaDeviceSynchronize();
-
-    // display the device's greeting
-    cudaPrintfDisplay();
-
-    // clean up after cuPrintf
-    cudaPrintfEnd();
+    cudaDeviceSynchronize();
 
     //ClearParticlesMT(i);          pthread_barrier_wait(&barrier);
     //RebuildGridMT(i);             pthread_barrier_wait(&barrier);
