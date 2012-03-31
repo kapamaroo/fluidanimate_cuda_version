@@ -351,11 +351,11 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     //cells = new Cell[numCells];
     //cnumPars = new int[numCells];
 
-    cudaMalloc((void**)&cells, numCells * sizeof(struct Cell));
-    cudaMalloc((void**)&cnumPars, numCells * sizeof(int));
+    CudaSafeCall( cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
 
-    cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell));
-    cudaMalloc((void**)&cnumPars2, numCells * sizeof(int));
+    CudaSafeCall( cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
     //these should be tranfered to device after initialisation
     h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
@@ -537,11 +537,11 @@ void CleanUpSim()
     free(h_cnumPars2);
 
     //free device memory
-    cudaFree(cells);
-    cudaFree(cnumPars);
+    CudaSafeCall( cudaFree(cells) );
+    CudaSafeCall( cudaFree(cnumPars) );
 
-    cudaFree(cells2);
-    cudaFree(cnumPars2);
+    CudaSafeCall( cudaFree(cells2) );
+    CudaSafeCall( cudaFree(cnumPars2) );
 
     //delete[] cells2;
     //delete[] cnumPars2;
@@ -1173,8 +1173,8 @@ int main(int argc, char *argv[]) {
 
 
     //move data to device
-    cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice);
-    cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice);
+    CudaSafeCall( cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
+    CudaSafeCall( cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
 
     //cuda wrapper
@@ -1182,8 +1182,8 @@ int main(int argc, char *argv[]) {
 
     //move data to host
     /*** ATTENTION !!! we use the same host buffer ***/
-    cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost);
+    CudaSafeCall( cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
 
 #ifdef ENABLE_PARSEC_HOOKS
