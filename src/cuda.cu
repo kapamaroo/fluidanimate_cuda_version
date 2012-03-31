@@ -140,6 +140,10 @@ __device__ float pressureCoeff;
 __device__ float viscosityCoeff;
 
 // number of grid cells in each dimension
+int h_nx;
+int h_ny;
+int h_nz;
+
 __device__ int nx;
 __device__ int ny;
 __device__ int nz;
@@ -278,9 +282,9 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float range_y = domainMax_y - domainMin_y;
     float range_z = domainMax_z - domainMin_z;
 
-    int h_nx = (int)(range_x / h_h);
-    int h_ny = (int)(range_y / h_h);
-    int h_nz = (int)(range_z / h_h);
+    h_nx = (int)(range_x / h_h);
+    h_ny = (int)(range_y / h_h);
+    h_nz = (int)(range_z / h_h);
 
     assert(h_nx >= 1 && h_ny >= 1 && h_nz >= 1);
 
@@ -1132,9 +1136,9 @@ void AdvanceFrameMT() {
     grid_y = 1;      //no partitioning here
     grid_z = ZDIVS;
 
-    block_x = nx / XDIVS;
-    block_y = ny;
-    block_z = nz / ZDIVS;
+    block_x = h_nx / XDIVS;
+    block_y = h_ny;
+    block_z = h_nz / ZDIVS;
 
     //should check for max grid size and block size from deviceQuery //FIXME
 
