@@ -23,8 +23,8 @@ else
     ARCH="`uname -i`"
 
     if [ $ARCH = 'unknown' ]; then
-        echo "unkown platform, set to i686"
-        ARCH="i686"
+        echo "unkown platform, set to i386"
+        ARCH="i386"
     fi
 
     NVCCFLAGS="-I $SDK_HOME/C/common/inc/ \
