@@ -20,6 +20,14 @@
 #include <hooks.h>
 #endif
 
+void CudaSafeCall(int lineno, cudaError_t err) {
+    //    cudaError_t err = cudaGetLastError();
+    if( cudaSuccess != err) {
+        printf("Cuda error: line %d: %s.\n", lineno, cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+}
+
 static inline int isLittleEndian() {
     union {
         uint16_t word;
@@ -97,11 +105,12 @@ struct Cell
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ const float timeStep = 0.005f;
-__device__ const float doubleRestDensity = 2000.f;
-__device__ const float kernelRadiusMultiplier = 1.695f;
-__device__ const float stiffness = 1.5f;
-__device__ const float viscosity = 0.4f;
+const float timeStep = 0.005f;
+const float doubleRestDensity = 2000.f;
+const float kernelRadiusMultiplier = 1.695f;
+const float h_stiffness = 1.5f;
+const float viscosity = 0.4f;
+
 const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
 const Vec3 domainMax(0.065f, 0.1f, 0.065f);
@@ -120,15 +129,28 @@ const float domainMax_y = 0.1f;
 const float domainMax_z = 0.065f;
 
 
-__device__ float restParticlesPerMeter, h, hSq;
-__device__ float densityCoeff, pressureCoeff, viscosityCoeff;
+float restParticlesPerMeter;
 
-__device__ int nx, ny, nz;			// number of grid cells in each dimension
-__device__ Vec3 delta;				// cell dimensions
-__device__ int origNumParticles = 0;
+__device__ float h;
+__device__ float hSq;
+__device__ float tc_orig;
 
-__device__ int numParticles = 0;
-__device__ int numCells = 0;
+__device__ float densityCoeff;
+__device__ float pressureCoeff;
+__device__ float viscosityCoeff;
+
+// number of grid cells in each dimension
+__device__ int nx;
+__device__ int ny;
+__device__ int nz;
+
+__device__ float delta_x;
+__device__ float delta_y;
+__device__ float delta_z;
+
+int origNumParticles = 0;
+int numParticles = 0;
+int numCells = 0;
 
 //device memory
 __device__ Cell *cells = 0;
@@ -236,37 +258,42 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     }
     numParticles = origNumParticles;
 
-    h = kernelRadiusMultiplier / restParticlesPerMeter;
-    hSq = h*h;
+    float h_h = kernelRadiusMultiplier / restParticlesPerMeter;
+    float h_hSq = h_h*h_h;
+    float h_tc_orig = h_hSq*h_hSq*h_hSq;
 
     const float pi = 3.14159265358979f;
 
-    float coeff1 = 315.f / (64.f*pi*pow(h,9.f));
-    float coeff2 = 15.f / (pi*pow(h,6.f));
-    float coeff3 = 45.f / (pi*pow(h,6.f));
+    float coeff1 = 315.f / (64.f*pi*pow(h_h,9.f));
+    float coeff2 = 15.f / (pi*pow(h_h,6.f));
+    float coeff3 = 45.f / (pi*pow(h_h,6.f));
     float particleMass = 0.5f*doubleRestDensity / (restParticlesPerMeter*restParticlesPerMeter*restParticlesPerMeter);
 
-    densityCoeff = particleMass * coeff1;
-    pressureCoeff = 3.f*coeff2 * 0.5f*stiffness * particleMass;
-    viscosityCoeff = viscosity * coeff3 * particleMass;
+    float h_densityCoeff = particleMass * coeff1;
+    float h_pressureCoeff = 3.f*coeff2 * 0.5f*h_stiffness * particleMass;
+    float h_viscosityCoeff = viscosity * coeff3 * particleMass;
 
-    Vec3 range = domainMax - domainMin;
+    //Vec3 range = domainMax - domainMin;
+    float range_x = domainMax_x - domainMin_x;
+    float range_y = domainMax_y - domainMin_y;
+    float range_z = domainMax_z - domainMin_z;
 
-    nx = (int)(range.x / h);
-    ny = (int)(range.y / h);
-    nz = (int)(range.z / h);
+    int h_nx = (int)(range_x / h_h);
+    int h_ny = (int)(range_y / h_h);
+    int h_nz = (int)(range_z / h_h);
 
-    assert(nx >= 1 && ny >= 1 && nz >= 1);
+    assert(h_nx >= 1 && h_ny >= 1 && h_nz >= 1);
 
-    numCells = nx*ny*nz;
+    numCells = h_nx*h_ny*h_nz;
     std::cout << "Number of cells: " << numCells << std::endl;
 
-    delta.x = range.x / nx;
-    delta.y = range.y / ny;
-    delta.z = range.z / nz;
+    //Vec3 h_delta;
+    float h_delta_x = range_x / h_nx;
+    float h_delta_y = range_y / h_ny;
+    float h_delta_z = range_z / h_nz;
 
-    assert(delta.x >= h && delta.y >= h && delta.z >= h);
-    assert(nx >= XDIVS && nz >= ZDIVS);
+    assert(h_delta_x >= h_h && h_delta_y >= h_h && h_delta_z >= h_h);
+    assert(h_nx >= XDIVS && h_nz >= ZDIVS);
 
     /* this determines the size of the grid (in gpu world these are the blocks)
      * but as we see every block has the same size:
@@ -280,20 +307,20 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     for (int i = 0; i < XDIVS; ++i)
 	{
             sx = ex;
-            ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
+            ex = int(float(h_nx)/float(XDIVS) * (i+1) + 0.5f);
             assert(sx < ex);
 
             ez = 0;
             for (int j = 0; j < ZDIVS; ++j, ++gi)
 		{
                     sz = ez;
-                    ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
+                    ez = int(float(h_nz)/float(ZDIVS) * (j+1) + 0.5f);
                     assert(sz < ez);
 
                     grids[gi].sx = sx;
                     grids[gi].ex = ex;
                     grids[gi].sy = 0;
-                    grids[gi].ey = ny;
+                    grids[gi].ey = h_ny;
                     grids[gi].sz = sz;
                     grids[gi].ez = ez;
 		}
@@ -353,11 +380,11 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     //cells = new Cell[numCells];
     //cnumPars = new int[numCells];
 
-    CudaSafeCall( cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
-    CudaSafeCall( cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
 
-    CudaSafeCall( cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
-    CudaSafeCall( cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
     //these should be tranfered to device after initialisation
     h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
@@ -392,15 +419,15 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                 vz  = bswap_float(vz);
             }
 
-            int ci = (int)((px - domainMin.x) / delta.x);
-            int cj = (int)((py - domainMin.y) / delta.y);
-            int ck = (int)((pz - domainMin.z) / delta.z);
+            int ci = (int)((px - domainMin.x) / h_delta_x);
+            int cj = (int)((py - domainMin.y) / h_delta_y);
+            int ck = (int)((pz - domainMin.z) / h_delta_z);
 
-            if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
-            if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
-            if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
+            if (ci < 0) ci = 0; else if (ci > (h_nx-1)) ci = nx-1;
+            if (cj < 0) cj = 0; else if (cj > (h_ny-1)) cj = ny-1;
+            if (ck < 0) ck = 0; else if (ck > (h_nz-1)) ck = nz-1;
 
-            int index = (ck*ny + cj)*nx + ci;
+            int index = (ck*h_ny + cj)*h_nx + ci;
             Cell &cell = h_cells2[index];
 
             int np = h_cnumPars2[index];
@@ -420,6 +447,19 @@ void InitSim(char const *fileName, unsigned int threadnum) {
             else
                 --numParticles;
 	}
+
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nx", &h_nx, sizeof(int), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("ny", &h_ny, sizeof(int), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nz", &h_nz, sizeof(int), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_x", &h_delta_x, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_y", &h_delta_y, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_z", &h_delta_z, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
 
     std::cout << "Number of particles: " << numParticles << " (" << origNumParticles-numParticles << " skipped)" << std::endl;
 }
@@ -539,11 +579,11 @@ void CleanUpSim()
     free(h_cnumPars2);
 
     //free device memory
-    CudaSafeCall( cudaFree(cells) );
-    CudaSafeCall( cudaFree(cnumPars) );
+    CudaSafeCall( __LINE__, cudaFree(cells) );
+    CudaSafeCall( __LINE__, cudaFree(cnumPars) );
 
-    CudaSafeCall( cudaFree(cells2) );
-    CudaSafeCall( cudaFree(cnumPars2) );
+    CudaSafeCall( __LINE__, cudaFree(cells2) );
+    CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
 
     //delete[] cells2;
     //delete[] cnumPars2;
@@ -619,7 +659,8 @@ __global__ void big_kernel() {
     //it is safe to move the call here, neighbours do not change between the two original calls
     int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
 
-    const float tc = hSq*hSq*hSq;
+    //move this computation to cpu
+    //const float tc_orig = hSq*hSq*hSq;
 
     const float parSize = 0.0002f;
     const float epsilon = 1e-10f;
@@ -668,9 +709,9 @@ __global__ void big_kernel() {
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int ci = (int)((cell2.p[j].x - domainMin_x) / delta.x);
-        int cj = (int)((cell2.p[j].y - domainMin_y) / delta.y);
-        int ck = (int)((cell2.p[j].z - domainMin_z) / delta.z);
+        int ci = (int)((cell2.p[j].x - domainMin_x) / delta_x);
+        int cj = (int)((cell2.p[j].y - domainMin_y) / delta_y);
+        int ck = (int)((cell2.p[j].z - domainMin_z) / delta_z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -853,7 +894,7 @@ __global__ void big_kernel() {
     //    int np = cnumPars[index];
 
     for (int j = 0; j < np; ++j) {
-        cell.density[j] += tc;
+        cell.density[j] += tc_orig;
         cell.density[j] *= densityCoeff;
     }
 
@@ -1105,6 +1146,7 @@ void AdvanceFrameMT() {
     cudaPrintfInit();
 
     big_kernel<<<grid,block>>>();
+    //cudaDeviceSynchronize();
 
     // display the device's greeting
     cudaPrintfDisplay();
@@ -1188,8 +1230,8 @@ int main(int argc, char *argv[]) {
 
 
     //move data to device
-    CudaSafeCall( cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
-    CudaSafeCall( cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
 
     //cuda wrapper
@@ -1197,8 +1239,8 @@ int main(int argc, char *argv[]) {
 
     //move data to host
     /*** ATTENTION !!! we use the same host buffer ***/
-    CudaSafeCall( cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
-    CudaSafeCall( cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
 
 #ifdef ENABLE_PARSEC_HOOKS
