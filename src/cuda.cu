@@ -18,6 +18,14 @@
 #include <hooks.h>
 #endif
 
+void CudaSafeCall(cudaError_t err) {
+    //    cudaError_t err = cudaGetLastError();
+    if( cudaSuccess != err) {
+        printf("Cuda error: %s.\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+}
+
 static inline int isLittleEndian() {
     union {
         uint16_t word;
