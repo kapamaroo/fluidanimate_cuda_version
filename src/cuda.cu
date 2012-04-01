@@ -86,17 +86,26 @@ typedef struct Vec3 {
     float z;
 } Vec3;
 
-__host__ __device__ Vec3 *operator_add (Vec3 *n,Vec3 *v,Vec3 *s)    { n->x=v->x+s->x; n->y=v->y+s->y; n->z=v->z+s->z; return n;}
-__host__ __device__ Vec3 *operator_sub (Vec3 *n,Vec3 *v,Vec3 *s)    { n->x=v->x-s->x; n->y=v->y-s->y; n->z=v->z-s->z; return n;}
-__host__ __device__ Vec3 *operator_mult (Vec3 *n,Vec3 *v,float s)   { n->x=v->x*s; n->y=v->y*s; n->z=v->z*s; return n;}
-__host__ __device__ Vec3 *operator_div (Vec3 *n,Vec3 *v,float s)    { n->x=v->x/s; n->y=v->y/s; n->z=v->z/s; return n;}
-__host__ __device__ Vec3 *operator_minus (Vec3 *n,Vec3 *v)          { n->x=-v->x; n->y=-v->y; n->z=-v->z; return n;}
+__host__ __device__
+inline Vec3 *operator_add (Vec3 *n,const Vec3 *v,const Vec3 *s)  { n->x=v->x+s->x; n->y=v->y+s->y; n->z=v->z+s->z; return n;}
+__host__ __device__
+inline Vec3 *operator_sub (Vec3 *n,const Vec3 *v,const Vec3 *s)  { n->x=v->x-s->x; n->y=v->y-s->y; n->z=v->z-s->z; return n;}
+__host__ __device__
+inline Vec3 *operator_mult (Vec3 *n,const Vec3 *v,const float s) { n->x=v->x*s; n->y=v->y*s; n->z=v->z*s; return n;}
+__host__ __device__
+inline Vec3 *operator_div (Vec3 *n,const Vec3 *v,const float s)  { n->x=v->x/s; n->y=v->y/s; n->z=v->z/s; return n;}
+__host__ __device__
+inline Vec3 *operator_minus (Vec3 *n,const Vec3 *v)              { n->x=-v->x; n->y=-v->y; n->z=-v->z; return n;}
 
-__host__ __device__ float operator_mult_to_float (Vec3 *v,Vec3 *s)  { return s->x*v->x + s->y*v->y + s->z*v->z; }
+__host__ __device__
+inline float operator_mult_to_float (const Vec3 *v,const Vec3 *s)  { return s->x*v->x + s->y*v->y + s->z*v->z; }
 
-__device__    float   GetLengthSq(Vec3 *v)        { return operator_mult_to_float(v,v); }
-__device__    float   GetLength(Vec3 *v)          { return sqrtf(GetLengthSq(v)); }
-__device__    Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v)); }
+__device__
+inline float   GetLengthSq(Vec3 *v)        { return operator_mult_to_float(v,v); }
+__device__
+inline float   GetLength(Vec3 *v)          { return sqrtf(GetLengthSq(v)); }
+__device__
+inline Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v)); }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -123,7 +132,7 @@ const float viscosity = 0.4f;
 
 //const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 const Vec3 domainMin = {-0.065f, -0.08f, -0.065f};
-//const Vec3 domainMax(0.065f, 0.1f, 0.065f);
+const Vec3 domainMax = { 0.065f, 0.1f, 0.065f };
 
 //device constants
 const float externalAcceleration_x = 0.f;
@@ -150,13 +159,9 @@ __device__ float pressureCoeff;
 __device__ float viscosityCoeff;
 
 // number of grid cells in each dimension
-int h_nx;
-int h_ny;
-int h_nz;
-
-__device__ int nx;
-__device__ int ny;
-__device__ int nz;
+int nx;
+int ny;
+int nz;
 
 __device__ float delta_x;
 __device__ float delta_y;
@@ -295,27 +300,25 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float h_pressureCoeff = 3.f*coeff2 * 0.5f*h_stiffness * particleMass;
     float h_viscosityCoeff = viscosity * coeff3 * particleMass;
 
-    //Vec3 range = domainMax - domainMin;
-    float range_x = domainMax_x - domainMin_x;
-    float range_y = domainMax_y - domainMin_y;
-    float range_z = domainMax_z - domainMin_z;
+    Vec3 range;
+    operator_sub(&range,&domainMax,&domainMin);
 
-    h_nx = (int)(range_x / h_h);
-    h_ny = (int)(range_y / h_h);
-    h_nz = (int)(range_z / h_h);
+    nx = (int)(range.x / h_h);
+    ny = (int)(range.y / h_h);
+    nz = (int)(range.z / h_h);
 
-    assert(h_nx >= 1 && h_ny >= 1 && h_nz >= 1);
+    assert(nx >= 1 && ny >= 1 && nz >= 1);
 
-    numCells = h_nx*h_ny*h_nz;
+    numCells = nx*ny*nz;
     printf("Number of cells: %d\n",numCells);
 
     //Vec3 h_delta;
-    float h_delta_x = range_x / h_nx;
-    float h_delta_y = range_y / h_ny;
-    float h_delta_z = range_z / h_nz;
+    float h_delta_x = range.x / nx;
+    float h_delta_y = range.y / ny;
+    float h_delta_z = range.z / nz;
 
     assert(h_delta_x >= h_h && h_delta_y >= h_h && h_delta_z >= h_h);
-    assert(h_nx >= XDIVS && h_nz >= ZDIVS);
+    assert(nx >= XDIVS && nz >= ZDIVS);
 
     /* this determines the size of the grid (in gpu world these are the blocks)
      * but as we see every block has the same size:
@@ -430,11 +433,11 @@ void InitSim(char const *fileName, unsigned int threadnum) {
             int cj = (int)((py - domainMin.y) / h_delta_y);
             int ck = (int)((pz - domainMin.z) / h_delta_z);
 
-            if (ci < 0) ci = 0; else if (ci > (h_nx-1)) ci = nx-1;
-            if (cj < 0) cj = 0; else if (cj > (h_ny-1)) cj = ny-1;
-            if (ck < 0) ck = 0; else if (ck > (h_nz-1)) ck = nz-1;
+            if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
+            if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
+            if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
 
-            int index = (ck*h_ny + cj)*h_nx + ci;
+            int index = (ck*ny + cj)*nx + ci;
             Cell &cell = h_cells2[index];
 
             int np = h_cnumPars2[index];
@@ -462,9 +465,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nx", &h_nx, sizeof(int), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("ny", &h_ny, sizeof(int), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nz", &h_nz, sizeof(int), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_x", &h_delta_x, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_y", &h_delta_y, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_z", &h_delta_z, sizeof(float), 0, cudaMemcpyHostToDevice) );
@@ -591,6 +591,10 @@ void CleanUpSim()
 __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
     int numNeighCells = 0;
 
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
+
     for (int di = -1; di <= 1; ++di)
         for (int dj = -1; dj <= 1; ++dj)
             for (int dk = -1; dk <= 1; ++dk)
@@ -627,6 +631,10 @@ __global__ void big_kernel() {
     int ix;
     int iy;
     int iz;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
 
     ix = blockIdx.x * blockDim.x + threadIdx.x;
     iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1150,9 +1158,9 @@ int main(int argc, char *argv[]) {
     grid_y = 1;      //no partitioning here
     grid_z = ZDIVS;
 
-    block_x = h_nx / XDIVS;
-    block_y = h_ny;
-    block_z = h_nz / ZDIVS;
+    block_x = nx / XDIVS;
+    block_y = ny;
+    block_z = nz / ZDIVS;
 
     //should check for max grid size and block size from deviceQuery //FIXME
 
