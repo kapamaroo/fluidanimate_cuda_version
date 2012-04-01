@@ -1,22 +1,14 @@
 //Code originally written by Richard O. Lee
 //Modified by Christian Bienia and Christian Fensch
 
-#include <cstdlib>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+//#include <string.h>
 
-#include <iostream>
-#include <fstream>
 #include <math.h>
 #include <stdint.h>
-//#include <pthread.h>
 #include <assert.h>
 #include <cutil.h>
-
-//#include "parsec_barrier.hpp"
-
-#ifdef ENABLE_PARSEC_HOOKS
-#include <hooks.h>
-#endif
 
 void CudaSafeCall(int lineno, cudaError_t err) {
     //    cudaError_t err = cudaGetLastError();
@@ -60,8 +52,9 @@ static inline int bswap_int32(int x) {
 
 // note: icc-optimized version of this class gave 15% more
 // performance than our hand-optimized SSE3 implementation
-class Vec3
-{
+
+/*
+class Vec3 {
  public:
     float x, y, z;
 
@@ -85,6 +78,25 @@ __device__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s
 
 __device__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
 };
+*/
+
+typedef struct Vec3 {
+    float x;
+    float y;
+    float z;
+} Vec3;
+
+__host__ __device__ Vec3 *operator_add (Vec3 *n,Vec3 *v,Vec3 *s)    { n->x=v->x+s->x; n->y=v->y+s->y; n->z=v->z+s->z; return n;}
+__host__ __device__ Vec3 *operator_sub (Vec3 *n,Vec3 *v,Vec3 *s)    { n->x=v->x-s->x; n->y=v->y-s->y; n->z=v->z-s->z; return n;}
+__host__ __device__ Vec3 *operator_mult (Vec3 *n,Vec3 *v,float s)   { n->x=v->x*s; n->y=v->y*s; n->z=v->z*s; return n;}
+__host__ __device__ Vec3 *operator_div (Vec3 *n,Vec3 *v,float s)    { n->x=v->x/s; n->y=v->y/s; n->z=v->z/s; return n;}
+__host__ __device__ Vec3 *operator_minus (Vec3 *n,Vec3 *v)          { n->x=-v->x; n->y=-v->y; n->z=-v->z; return n;}
+
+__host__ __device__ float operator_mult_to_float (Vec3 *v,Vec3 *s)  { return s->x*v->x + s->y*v->y + s->z*v->z; }
+
+__device__    float   GetLengthSq(Vec3 *v)        { return operator_mult_to_float(v,v); }
+__device__    float   GetLength(Vec3 *v)          { return sqrtf(GetLengthSq(v)); }
+__device__    Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v)); }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -109,9 +121,9 @@ const float kernelRadiusMultiplier = 1.695f;
 const float h_stiffness = 1.5f;
 const float viscosity = 0.4f;
 
-const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
-const Vec3 domainMax(0.065f, 0.1f, 0.065f);
+//const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
+const Vec3 domainMin = {-0.065f, -0.08f, -0.065f};
+//const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
 //device constants
 const float externalAcceleration_x = 0.f;
@@ -229,10 +241,12 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     //NOTE: Other partition sizes are possible as long as XDIVS * ZDIVS == threadnum,
     //      but communication is minimal (and hence optimal) if XDIVS == ZDIVS
 
+
+    FILE *file;
     int lsb;
 
     if (hmgweight(threadnum,&lsb) != 1) {
-        std::cerr << "Number of threads must be a power of 2" << std::endl;
+        printf("Number of threads must be a power of 2\n");
         exit(1);
     }
 
@@ -248,21 +262,27 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     //    grids = new struct Grid[NUM_GRIDS];
 
     //Load input particles
-    std::cout << "Loading file \"" << fileName << "\"..." << std::endl;
-    std::ifstream file(fileName, std::ios::binary);
+
+    printf("Loading file \"%s\"...\n",fileName);
+    file = fopen(fileName,"rb");
     assert(file);
 
-    file.read((char *)&restParticlesPerMeter, 4);
-    file.read((char *)&origNumParticles, 4);
+    fread(&restParticlesPerMeter,4,1,file);
+    fread(&origNumParticles,4,1,file);
+
     if (!isLittleEndian()) {
         restParticlesPerMeter = bswap_float(restParticlesPerMeter);
         origNumParticles      = bswap_int32(origNumParticles);
     }
     numParticles = origNumParticles;
 
+    printf("restParticlesPerMeter: %f\norigNumParticles: %d\n",restParticlesPerMeter,origNumParticles);
+
     float h_h = kernelRadiusMultiplier / restParticlesPerMeter;
     float h_hSq = h_h*h_h;
     float h_tc_orig = h_hSq*h_hSq*h_hSq;
+
+    printf("h_h: %f\n",h_h);
 
     const float pi = 3.14159265358979f;
 
@@ -287,7 +307,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(h_nx >= 1 && h_ny >= 1 && h_nz >= 1);
 
     numCells = h_nx*h_ny*h_nz;
-    std::cout << "Number of cells: " << numCells << std::endl;
+    printf("Number of cells: %d\n",numCells);
 
     //Vec3 h_delta;
     float h_delta_x = range_x / h_nx;
@@ -364,21 +384,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                     }
     */
 
-    /*
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-    mutex = new pthread_mutex_t *[numCells];
-    for (int i = 0; i < numCells; ++i)
-	{
-            int n = (border[i] ? 16 : 1);
-            mutex[i] = new pthread_mutex_t[n];
-            for (int j = 0; j < n; ++j)
-                pthread_mutex_init(&mutex[i][j], NULL);
-	}
-    pthread_barrier_init(&barrier, NULL, NUM_GRIDS);
-    */
-
     //cells = new Cell[numCells];
     //cnumPars = new int[numCells];
 
@@ -400,15 +405,15 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float px, py, pz, hvx, hvy, hvz, vx, vy, vz;
     for (int i = 0; i < origNumParticles; ++i)
 	{
-            file.read((char *)&px, 4);
-            file.read((char *)&py, 4);
-            file.read((char *)&pz, 4);
-            file.read((char *)&hvx, 4);
-            file.read((char *)&hvy, 4);
-            file.read((char *)&hvz, 4);
-            file.read((char *)&vx, 4);
-            file.read((char *)&vy, 4);
-            file.read((char *)&vz, 4);
+            fread(&px, 4,1,file);
+            fread(&py, 4,1,file);
+            fread(&pz, 4,1,file);
+            fread(&hvx, 4,1,file);
+            fread(&hvy, 4,1,file);
+            fread(&hvz, 4,1,file);
+            fread(&vx, 4,1,file);
+            fread(&vy, 4,1,file);
+            fread(&vz, 4,1,file);
             if (!isLittleEndian()) {
                 px  = bswap_float(px);
                 py  = bswap_float(py);
@@ -450,6 +455,8 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                 --numParticles;
 	}
 
+    fclose(file);
+
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
@@ -463,16 +470,17 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_z", &h_delta_z, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
 
-    std::cout << "Number of particles: " << numParticles << " (" << origNumParticles-numParticles << " skipped)" << std::endl;
+    printf("Number of particles: %d (%d) skipped\n",numParticles,origNumParticles-numParticles);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void SaveFile(char const *fileName)
 {
-    std::cout << "Saving file \"" << fileName << "\"..." << std::endl;
+    printf("Saving file \"%s\"...\n", fileName);
 
-    std::ofstream file(fileName, std::ios::binary);
+    FILE *file;
+    file = fopen(fileName,"wb+");
     assert(file);
 
     if (!isLittleEndian()) {
@@ -481,11 +489,11 @@ void SaveFile(char const *fileName)
 
         restParticlesPerMeter_le = bswap_float(restParticlesPerMeter);
         origNumParticles_le      = bswap_int32(origNumParticles);
-        file.write((char *)&restParticlesPerMeter_le, 4);
-        file.write((char *)&origNumParticles_le,      4);
+        fwrite(&restParticlesPerMeter_le, 4,1,file);
+        fwrite(&origNumParticles_le,      4,1,file);
     } else {
-        file.write((char *)&restParticlesPerMeter, 4);
-        file.write((char *)&origNumParticles,      4);
+        fwrite((char *)&restParticlesPerMeter, 4,1,file);
+        fwrite((char *)&origNumParticles,      4,1,file);
     }
 
     int count = 0;
@@ -509,25 +517,25 @@ void SaveFile(char const *fileName)
                         vy  = bswap_float(cell.v[j].y);
                         vz  = bswap_float(cell.v[j].z);
 
-                        file.write((char *)&px,  4);
-                        file.write((char *)&py,  4);
-                        file.write((char *)&pz,  4);
-                        file.write((char *)&hvx, 4);
-                        file.write((char *)&hvy, 4);
-                        file.write((char *)&hvz, 4);
-                        file.write((char *)&vx,  4);
-                        file.write((char *)&vy,  4);
-                        file.write((char *)&vz,  4);
+                        fwrite((char *)&px,  4,1,file);
+                        fwrite((char *)&py,  4,1,file);
+                        fwrite((char *)&pz,  4,1,file);
+                        fwrite((char *)&hvx, 4,1,file);
+                        fwrite((char *)&hvy, 4,1,file);
+                        fwrite((char *)&hvz, 4,1,file);
+                        fwrite((char *)&vx,  4,1,file);
+                        fwrite((char *)&vy,  4,1,file);
+                        fwrite((char *)&vz,  4,1,file);
                     } else {
-                        file.write((char *)&cell.p[j].x,  4);
-                        file.write((char *)&cell.p[j].y,  4);
-                        file.write((char *)&cell.p[j].z,  4);
-                        file.write((char *)&cell.hv[j].x, 4);
-                        file.write((char *)&cell.hv[j].y, 4);
-                        file.write((char *)&cell.hv[j].z, 4);
-                        file.write((char *)&cell.v[j].x,  4);
-                        file.write((char *)&cell.v[j].y,  4);
-                        file.write((char *)&cell.v[j].z,  4);
+                        fwrite((char *)&cell.p[j].x,  4,1,file);
+                        fwrite((char *)&cell.p[j].y,  4,1,file);
+                        fwrite((char *)&cell.p[j].z,  4,1,file);
+                        fwrite((char *)&cell.hv[j].x, 4,1,file);
+                        fwrite((char *)&cell.hv[j].y, 4,1,file);
+                        fwrite((char *)&cell.hv[j].z, 4,1,file);
+                        fwrite((char *)&cell.v[j].x,  4,1,file);
+                        fwrite((char *)&cell.v[j].y,  4,1,file);
+                        fwrite((char *)&cell.v[j].z,  4,1,file);
                     }
                     ++count;
 		}
@@ -542,40 +550,25 @@ void SaveFile(char const *fileName)
 
     for (int i = 0; i < numSkipped; ++i)
 	{
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
+            fwrite((char *)&zero, 4,1,file);
 	}
+
+    fflush(file);
+    fclose(file);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void CleanUpSim()
 {
-    /*
-    pthread_attr_destroy(&attr);
-
-    for (int i = 0; i < numCells; ++i)
-	{
-            int n = (border[i] ? 16 : 1);
-            for (int j = 0; j < n; ++j)
-                pthread_mutex_destroy(&mutex[i][j]);
-            delete[] mutex[i];
-	}
-    pthread_barrier_destroy(&barrier);
-    delete[] mutex;
-    */
-
-    //delete[] border;
-    //delete[] cells;
-    //delete[] cnumPars;
-
     //free host memory
     free(h_cells2);
     free(h_cnumPars2);
@@ -586,11 +579,6 @@ void CleanUpSim()
 
     CudaSafeCall( __LINE__, cudaFree(cells2) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
-
-    //delete[] cells2;
-    //delete[] cnumPars2;
-    //delete[] thread;
-    //delete[] grids;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -651,10 +639,10 @@ __global__ void big_kernel() {
     //move common declarations on top
 
     int index = (iz*ny + iy)*nx + ix;
-    int np = 0;  //internal loop limit
+    int np;  //internal loop limit
 
     //this should be moved to shared memory
-    Cell &cell = cells[index];  //just a pointer to the correspondig cell //FIXME
+    Cell &cell = cells[index];  //just a reference to the correspondig cell //FIXME
 
     int neighCells[27];
 
@@ -721,7 +709,7 @@ __global__ void big_kernel() {
 
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
-        int np_renamed;
+        int np_renamed = cnumPars[index2];
 
         //use macro
         //if (border[index2]) {
@@ -734,7 +722,7 @@ __global__ void big_kernel() {
             //use atomic
             atomicAdd(&cnumPars[index2],1);
         } else {
-            np_renamed = cnumPars[index2]++;
+            cnumPars[index2]++;
         }
 
         //#warning what if we exceed 16 particles per cell here??
@@ -825,6 +813,8 @@ __global__ void big_kernel() {
 
     //    Cell &cell = cells[index];
 
+    Vec3 tmp;
+
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
@@ -832,7 +822,10 @@ __global__ void big_kernel() {
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                    float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
+                    //float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
+                    float distSq;
+                    operator_sub(&tmp,&cell.p[j],&neigh.p[iparNeigh]);
+                    distSq = GetLengthSq(&tmp);
                     if (distSq < hSq) {
                         float t = hSq - distSq;
                         float tc = t*t*t;
@@ -942,18 +935,30 @@ __global__ void big_kernel() {
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                    Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
-                    float distSq = disp.GetLengthSq();
+                    //Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
+                    //float distSq = disp.GetLengthSq();
+                    Vec3 disp;
+                    operator_sub(&disp,&cell.p[j],&neigh.p[iparNeigh]);
+                    float distSq = GetLengthSq(&disp);
                     if (distSq < hSq) {
                         //float dist = sqrtf(std::max(distSq, 1e-12f));
                         float dist = sqrtf(fmax(distSq, 1e-12f));
                         float hmr = h - dist;
 
-                        Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) *
-                            (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity);
+                        //Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) *
+                        //    (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity);
 
-                        acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
-                        acc /= cell.density[j] * neigh.density[iparNeigh];
+                        //acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
+                        //acc /= cell.density[j] * neigh.density[iparNeigh];
+
+                        Vec3 acc;
+                        operator_mult(&acc,&disp, pressureCoeff * (hmr*hmr/dist) *
+                                      (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity));
+
+                        operator_sub(&tmp,&neigh.v[iparNeigh],&cell.v[j]);
+                        operator_mult(&tmp,&tmp,viscosityCoeff * hmr);
+                        operator_add(&acc,&acc,&tmp);
+                        operator_div(&acc,&acc,cell.density[j] * neigh.density[iparNeigh]);
 
                         //if (border[index]) {
                         if (IS_BORDER(ix,iy,iz)) {
@@ -967,7 +972,7 @@ __global__ void big_kernel() {
                             atomicAdd(&cell.a[j].y,acc.y);
                             atomicAdd(&cell.a[j].z,acc.z);
                         } else {
-                            cell.a[j] += acc;
+                            operator_add(&cell.a[j],&cell.a[j],&acc);
                         }
 
                         //if indexNeigh < 0 , cell is border
@@ -988,7 +993,7 @@ __global__ void big_kernel() {
                             atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                             atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
                         } else {
-                            neigh.a[iparNeigh] -= acc;
+                            operator_sub(&neigh.a[iparNeigh],&neigh.a[iparNeigh],&acc);
                         }
                     }
                 }
@@ -1027,7 +1032,10 @@ __global__ void big_kernel() {
     //    int np = cnumPars[index];
 
     for (int j = 0; j < np; ++j) {
-        Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
+        //Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
+        Vec3 pos;
+        operator_mult(&pos,&cell.hv[j],timeStep);
+        operator_add(&pos,&pos,&cell.p[j]);
 
         float diff = parSize - (pos.x - domainMin_x);
         if (diff > epsilon)
@@ -1082,11 +1090,26 @@ __global__ void big_kernel() {
     //    int np = cnumPars[index];
 
     for (int j = 0; j < np; ++j) {
-        Vec3 v_half = cell.hv[j] + cell.a[j]*timeStep;
-        cell.p[j] += v_half * timeStep;
-        cell.v[j] = cell.hv[j] + v_half;
-        cell.v[j] *= 0.5f;
-        cell.hv[j] = v_half;
+        //Vec3 v_half = cell.hv[j] + cell.a[j]*timeStep;
+        Vec3 v_half;
+        operator_mult(&v_half,&cell.a[j],timeStep);
+        operator_add(&v_half,&v_half,&cell.hv[j]);
+
+        //cell.hv[j] = v_half;
+        cell.hv[j].x = v_half.x;
+        cell.hv[j].y = v_half.y;
+        cell.hv[j].z = v_half.z;
+
+        //cell.v[j] *= 0.5f;
+        operator_mult(&cell.v[j],&cell.v[j],0.5f);
+
+        //cell.v[j] = cell.hv[j] + v_half;
+        operator_add(&cell.v[j],&cell.hv[j],&v_half);
+
+        //we can change v_half now, (we want to use only one tmp variable)
+        //cell.p[j] += v_half * timeStep;
+        operator_mult(&v_half,&v_half,timeStep);
+        operator_add(&cell.p[j],&cell.p[j],&v_half);
     }
 
     //                }  //close nested loops
@@ -1107,16 +1130,9 @@ __global__ void big_kernel() {
 
 } //close big_kernel()
 
-//void AdvanceFrameMT(int i) {
-void AdvanceFrameMT() {
+////////////////////////////////////////////////////////////////////////////////
 
-    //common loops in all functions
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
-
-
+int main(int argc, char *argv[]) {
     int grid_x;
     int grid_y;
     int grid_z;
@@ -1144,50 +1160,10 @@ void AdvanceFrameMT() {
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
-    big_kernel<<<grid,block>>>();
-    cudaDeviceSynchronize();
-
-    //ClearParticlesMT(i);          pthread_barrier_wait(&barrier);
-    //RebuildGridMT(i);             pthread_barrier_wait(&barrier);
-    //InitDensitiesAndForcesMT(i);  pthread_barrier_wait(&barrier);
-    //ComputeDensitiesMT(i);        pthread_barrier_wait(&barrier);
-    //ComputeDensities2MT(i);       pthread_barrier_wait(&barrier);
-    //ComputeForcesMT(i);           pthread_barrier_wait(&barrier);
-    //ProcessCollisionsMT(i);       pthread_barrier_wait(&barrier);
-    //AdvanceParticlesMT(i);        pthread_barrier_wait(&barrier);
-}
-
-//void *AdvanceFramesMT(void *args) {
-void *AdvanceFramesMT(int frames) {
-    //    thread_args *targs = (thread_args *)args;
-
-    //    for (int i = 0; i < targs->frames; ++i)
-    for (int i = 0; i < frames; ++i)
-        //AdvanceFrameMT(targs->tid);
-        AdvanceFrameMT();
-
-    return NULL;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-int main(int argc, char *argv[]) {
-#ifdef PARSEC_VERSION
-#define __PARSEC_STRING(x) #x
-#define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
-    std::cout << "PARSEC Benchmark Suite Version "__PARSEC_XSTRING(PARSEC_VERSION) << std::endl << std::flush;
-#else
-    std::cout << "PARSEC Benchmark Suite" << std::endl << std::flush;
-#endif //PARSEC_VERSION
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_bench_begin(__parsec_fluidanimate);
-#endif
-
-    if (argc < 4 || argc >= 6)
-	{
-            std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
-            return -1;
-	}
+    if (argc < 4 || argc >= 6) {
+        printf("Usage: %s <threadnum> <framenum> <.fluid input file> [.fluid output file]\n",argv[0]);
+        exit(EXIT_FAILURE);
+    }
 
     int threadnum = atoi(argv[1]);
     int framenum = atoi(argv[2]);
@@ -1195,32 +1171,16 @@ int main(int argc, char *argv[]) {
     //Check arguments
 
     if (threadnum < 1) {
-        std::cerr << "<threadnum> must at least be 1" << std::endl;
-        return -1;
+        printf("<threadnum> must at least be 1\n");
+        exit(EXIT_FAILURE);
     }
 
     if (framenum < 1) {
-        std::cerr << "<framenum> must at least be 1" << std::endl;
-        return -1;
+        printf("<framenum> must at least be 1\n");
+        exit(EXIT_FAILURE);
     }
 
     InitSim(argv[3], threadnum);
-
-    //    thread_args targs[threadnum];
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_roi_begin();
-#endif
-    /*    for (int i = 0; i < threadnum; ++i) {
-        targs[i].tid = i;
-        targs[i].frames = framenum;
-        pthread_create(&thread[i], &attr, AdvanceFramesMT, &targs[i]);
-    }
-    // *** PARALLEL PHASE *** //
-    for (int i = 0; i < threadnum; ++i) {
-        pthread_join(thread[i], NULL);
-    }
-    */
-
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
@@ -1228,28 +1188,23 @@ int main(int argc, char *argv[]) {
 
 
     //cuda wrapper
-    AdvanceFramesMT(framenum);
+    for (int i = 0; i < framenum; ++i) {
+        big_kernel<<<grid,block>>>();
+        cudaDeviceSynchronize();
+    }
 
     //move data to host
     /*** ATTENTION !!! we use the same host buffer ***/
     CudaSafeCall( __LINE__, cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
     CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
-
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_roi_end();
-#endif
-
-    if (argc > 4)
+    if (argc > 4) {
         SaveFile(argv[4]);
+    }
 
     CleanUpSim();
 
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_bench_end();
-#endif
-
-    return 0;
+    exit(EXIT_SUCCESS);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
