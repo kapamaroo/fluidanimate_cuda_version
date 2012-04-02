@@ -86,6 +86,30 @@ typedef struct Vec3 {
     float z;
 } Vec3;
 
+struct kernel_consts {
+    float h;
+    float hSq;
+    float densityCoeff;
+    float pressureCoeff;
+    float viscosityCoeff;
+    float tc_orig;
+    Vec3 delta;
+};
+
+struct kernel_consts host;
+//device memory
+struct kernel_consts *dev;
+
+/*
+__device__ float h;
+__device__ float hSq;
+__device__ float densityCoeff;
+__device__ float pressureCoeff;
+__device__ float viscosityCoeff;
+__device__ float tc_orig;
+__device__ Vec3 delta;
+*/
+
 __host__ __device__
 inline Vec3 *operator_add (Vec3 *n,const Vec3 *v,const Vec3 *s)  { n->x=v->x+s->x; n->y=v->y+s->y; n->z=v->z+s->z; return n;}
 __host__ __device__
@@ -130,45 +154,19 @@ const float kernelRadiusMultiplier = 1.695f;
 const float h_stiffness = 1.5f;
 const float viscosity = 0.4f;
 
-//const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-const Vec3 domainMin = {-0.065f, -0.08f, -0.065f};
-const Vec3 domainMax = { 0.065f, 0.1f, 0.065f };
+__device__ const Vec3 externalAcceleration = {0.f, -9.8f, 0.f};
+__device__ const Vec3 domainMin = {-0.065f, -0.08f, -0.065f};
+__device__ const Vec3 domainMax = { 0.065f, 0.1f, 0.065f };
 
-//device constants
-const float externalAcceleration_x = 0.f;
-const float externalAcceleration_y = -9.8f;
-const float externalAcceleration_z = 0.f;
-
-const float domainMin_x = -0.065f;
-const float domainMin_y = -0.08f;
-const float domainMin_z = -0.065f;
-
-const float domainMax_x = 0.065f;
-const float domainMax_y = 0.1f;
-const float domainMax_z = 0.065f;
-
+const Vec3 h_domainMin = {-0.065f, -0.08f, -0.065f};
+const Vec3 h_domainMax = { 0.065f, 0.1f, 0.065f };
 
 float restParticlesPerMeter;
-
-__device__
-//__constant__
-float h;
-
-__device__ float hSq;
-__device__ float tc_orig;
-
-__device__ float densityCoeff;
-__device__ float pressureCoeff;
-__device__ float viscosityCoeff;
 
 // number of grid cells in each dimension
 int nx;
 int ny;
 int nz;
-
-__device__ float delta_x;
-__device__ float delta_y;
-__device__ float delta_z;
 
 int origNumParticles = 0;
 int numParticles = 0;
@@ -201,18 +199,6 @@ struct Grid
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-*/
-
-//pthread_attr_t attr;
-//pthread_t *thread;
-//pthread_mutex_t **mutex;	// used to lock cells in RebuildGrid and also particles in other functions
-//pthread_barrier_t barrier;	// global barrier used by all threads
-
-/*
-typedef struct __thread_args {
-    int tid;			//thread id, determines work partition
-    int frames;			//number of frames to compute
-} thread_args;			//arguments for threads
 */
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -306,7 +292,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float h_viscosityCoeff = viscosity * coeff3 * particleMass;
 
     Vec3 range;
-    operator_sub(&range,&domainMax,&domainMin);
+    operator_sub(&range,&h_domainMax,&h_domainMin);
 
     nx = (int)(range.x / h_h);
     ny = (int)(range.y / h_h);
@@ -317,19 +303,15 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     numCells = nx*ny*nz;
     printf("Number of cells: %d\n",numCells);
 
-    //Vec3 h_delta;
-    float h_delta_x = range.x / nx;
-    float h_delta_y = range.y / ny;
-    float h_delta_z = range.z / nz;
+    Vec3 h_delta;
+    h_delta.x = range.x / nx;
+    h_delta.y = range.y / ny;
+    h_delta.z = range.z / nz;
 
-    assert(h_delta_x >= h_h && h_delta_y >= h_h && h_delta_z >= h_h);
+    assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
     /* this determines the size of the grid (in gpu world these are the blocks)
-     * but as we see every block has the same size:
-     * dim_x = nx / XDIVS
-     * dim_y = ny          //no tiling in this dimension
-     * dim_z = nz / ZDIVS
 
     int gi = 0;
     int sx, sz, ex, ez;
@@ -444,9 +426,9 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                 vz  = bswap_float(vz);
             }
 
-            int ci = (int)((px - domainMin.x) / h_delta_x);
-            int cj = (int)((py - domainMin.y) / h_delta_y);
-            int ck = (int)((pz - domainMin.z) / h_delta_z);
+            int ci = (int)((px - h_domainMin.x) / h_delta.x);
+            int cj = (int)((py - h_domainMin.y) / h_delta.y);
+            int ck = (int)((pz - h_domainMin.z) / h_delta.z);
 
             if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
             if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -475,16 +457,28 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
     fclose(file);
 
+    host.h = h_h;
+    host.hSq = h_hSq;
+    host.densityCoeff = h_densityCoeff;
+    host.pressureCoeff = h_pressureCoeff;
+    host.viscosityCoeff = h_viscosityCoeff;
+    host.tc_orig = h_tc_orig;
+    host.delta.x = h_delta.x;
+    host.delta.y = h_delta.y;
+    host.delta.z = h_delta.z;
+
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&dev, sizeof(struct kernel_consts)) );
+    CudaSafeCall ( __LINE__, cudaMemcpy(dev, &host, sizeof(struct kernel_consts), cudaMemcpyHostToDevice) );
+
+    /*
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_x", &h_delta_x, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_y", &h_delta_y, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_z", &h_delta_z, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(struct Vec3), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
-
+    */
     printf("Number of particles: %d (%d) skipped\n",numParticles,origNumParticles-numParticles);
 }
 
@@ -589,6 +583,8 @@ void CleanUpSim()
     free(h_cnumPars2);
 
     //free device memory
+    CudaSafeCall( __LINE__, cudaFree(dev) );
+
     CudaSafeCall( __LINE__, cudaFree(cells) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars) );
 
@@ -641,7 +637,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev) {
 
     int ix;
     int iy;
@@ -722,9 +718,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int ci = (int)((cell2.p[j].x - domainMin_x) / delta_x);
-        int cj = (int)((cell2.p[j].y - domainMin_y) / delta_y);
-        int ck = (int)((cell2.p[j].z - domainMin_z) / delta_z);
+        int ci = (int)((cell2.p[j].x - domainMin.x) / dev->delta.x);
+        int cj = (int)((cell2.p[j].y - domainMin.y) / dev->delta.y);
+        int ck = (int)((cell2.p[j].z - domainMin.z) / dev->delta.z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -795,9 +791,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] = 0.f;
-        cell.a[j].x = externalAcceleration_x;
-        cell.a[j].y = externalAcceleration_y;
-        cell.a[j].z = externalAcceleration_z;
+        cell.a[j].x = externalAcceleration.x;
+        cell.a[j].y = externalAcceleration.y;
+        cell.a[j].z = externalAcceleration.z;
     }
 
 
@@ -849,8 +845,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                     float distSq;
                     operator_sub(&tmp,&cell.p[j],&neigh.p[iparNeigh]);
                     distSq = GetLengthSq(&tmp);
-                    if (distSq < hSq) {
-                        float t = hSq - distSq;
+                    if (distSq < dev->hSq) {
+                        float t = dev->hSq - distSq;
                         float tc = t*t*t;
 
                         //if (border[index]) {
@@ -912,8 +908,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     //    int np = cnumPars[index];
 
     for (int j = 0; j < np; ++j) {
-        cell.density[j] += tc_orig;
-        cell.density[j] *= densityCoeff;
+        cell.density[j] += dev->tc_orig;
+        cell.density[j] *= dev->densityCoeff;
     }
 
     //                }  //close nested loops
@@ -963,10 +959,10 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                     Vec3 disp;
                     operator_sub(&disp,&cell.p[j],&neigh.p[iparNeigh]);
                     float distSq = GetLengthSq(&disp);
-                    if (distSq < hSq) {
+                    if (distSq < dev->hSq) {
                         //float dist = sqrtf(std::max(distSq, 1e-12f));
                         float dist = sqrtf(fmax(distSq, 1e-12f));
-                        float hmr = h - dist;
+                        float hmr = dev->h - dist;
 
                         //Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) *
                         //    (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity);
@@ -975,11 +971,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         //acc /= cell.density[j] * neigh.density[iparNeigh];
 
                         Vec3 acc;
-                        operator_mult(&acc,&disp, pressureCoeff * (hmr*hmr/dist) *
+                        operator_mult(&acc,&disp, dev->pressureCoeff * (hmr*hmr/dist) *
                                       (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity));
 
                         operator_sub(&tmp,&neigh.v[iparNeigh],&cell.v[j]);
-                        operator_mult(&tmp,&tmp,viscosityCoeff * hmr);
+                        operator_mult(&tmp,&tmp,dev->viscosityCoeff * hmr);
                         operator_add(&acc,&acc,&tmp);
                         operator_div(&acc,&acc,cell.density[j] * neigh.density[iparNeigh]);
 
@@ -1060,27 +1056,27 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         operator_mult(&pos,&cell.hv[j],timeStep);
         operator_add(&pos,&pos,&cell.p[j]);
 
-        float diff = parSize - (pos.x - domainMin_x);
+        float diff = parSize - (pos.x - domainMin.x);
         if (diff > epsilon)
             cell.a[j].x += stiffness*diff - damping*cell.v[j].x;
 
-        diff = parSize - (domainMax_x - pos.x);
+        diff = parSize - (domainMax.x - pos.x);
         if (diff > epsilon)
             cell.a[j].x -= stiffness*diff + damping*cell.v[j].x;
 
-        diff = parSize - (pos.y - domainMin_y);
+        diff = parSize - (pos.y - domainMin.y);
         if (diff > epsilon)
             cell.a[j].y += stiffness*diff - damping*cell.v[j].y;
 
-        diff = parSize - (domainMax_y - pos.y);
+        diff = parSize - (domainMax.y - pos.y);
         if (diff > epsilon)
             cell.a[j].y -= stiffness*diff + damping*cell.v[j].y;
 
-        diff = parSize - (pos.z - domainMin_z);
+        diff = parSize - (pos.z - domainMin.z);
         if (diff > epsilon)
             cell.a[j].z += stiffness*diff - damping*cell.v[j].z;
 
-        diff = parSize - (domainMax_z - pos.z);
+        diff = parSize - (domainMax.z - pos.z);
         if (diff > epsilon)
             cell.a[j].z -= stiffness*diff + damping*cell.v[j].z;
     }
@@ -1155,6 +1151,13 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 ////////////////////////////////////////////////////////////////////////////////
 
+__global__ void test() {
+    printf("hello\n");
+    //printf("hello from: block (%d, %d, %d) thread (%d, %d, %d)\n",
+    //       blockIdx.x,blockIdx.y,blockIdx.z,
+    //       threadIdx.x,threadIdx.y,threadIdx.z);
+}
+
 int main(int argc, char *argv[]) {
     int i;
 
@@ -1166,24 +1169,8 @@ int main(int argc, char *argv[]) {
     int block_y;
     int block_z;
 
-    //minus 1, because indexing starts from 0 and here we declare the block size
-    // block_x should be nx / XDIVS
-    // block_y should be ny          //no partitioning here
-    // block_z should be nz / ZDIVS
-
-    grid_x = XDIVS;
-    grid_y = 1;      //no partitioning here
-    grid_z = ZDIVS;
-
-    block_x = nx / XDIVS;
-    block_y = ny;
-    block_z = nz / ZDIVS;
-
-    //should check for max grid size and block size from deviceQuery //FIXME
-
-    //kernel stuff
-    dim3 grid(grid_x, grid_y, grid_z);
-    dim3 block(block_x, block_y, block_z);
+    test<<<10,10>>>();
+    exit(0);
 
     if (argc < 4 || argc >= 6) {
         printf("Usage: %s <threadnum> <framenum> <.fluid input file> [.fluid output file]\n",argv[0]);
@@ -1208,12 +1195,32 @@ int main(int argc, char *argv[]) {
     //read input file, allocate memory, etc
     InitSim(argv[3], threadnum);
 
+    //minus 1, because indexing starts from 0 and here we declare the block size
+    // block_x should be nx / XDIVS
+    // block_y should be ny          //no partitioning here
+    // block_z should be nz / ZDIVS
+
+    grid_x = XDIVS;
+    grid_y = 1;      //no partitioning here
+    grid_z = ZDIVS;
+
+    block_x = nx / XDIVS;
+    block_y = ny;
+    block_z = nz / ZDIVS;
+
+    //should check for max grid size and block size from deviceQuery //FIXME
+
+    //kernel stuff
+    dim3 grid(grid_x, grid_y, grid_z);
+    dim3 block(block_x, block_y, block_z);
+
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
     for (i=0;i<framenum;i++) {
-        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
+        //test<<<grid,block>>>();
+        //big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,dev);
         cudaDeviceSynchronize();
     }
 
