@@ -49,7 +49,6 @@ static inline int bswap_int32(int x) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
 // note: icc-optimized version of this class gave 15% more
 // performance than our hand-optimized SSE3 implementation
 
@@ -132,7 +131,6 @@ __device__
 inline Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v)); }
 
 ////////////////////////////////////////////////////////////////////////////////
-
 // there is a current limitation of 16 particles per cell
 // (this structure use to be a simple linked-list of particles but, due to
 // improved cache locality, we get a huge performance increase by copying
@@ -484,8 +482,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void SaveFile(char const *fileName)
-{
+void SaveFile(char const *fileName) {
     printf("Saving file \"%s\"...\n", fileName);
 
     FILE *file;
@@ -506,49 +503,49 @@ void SaveFile(char const *fileName)
     }
 
     int count = 0;
-    for (int i = 0; i < numCells; ++i)
-	{
-#warning reminder: we use the same host buffer for input and output
-            Cell const &cell = h_cells[i];
-            int np = h_cnumPars[i];
-            for (int j = 0; j < np; ++j)
-		{
-                    if (!isLittleEndian()) {
-                        float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
+    for (int i = 0; i < numCells; ++i) {
+        Cell const &cell = h_cells[i];
+        int np = h_cnumPars[i];
+        //printf("np: %d\n",np);
+        for (int j = 0; j < np; ++j) {
+            /*
+            if (!isLittleEndian()) {
+                float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
 
-                        px  = bswap_float(cell.p[j].x);
-                        py  = bswap_float(cell.p[j].y);
-                        pz  = bswap_float(cell.p[j].z);
-                        hvx = bswap_float(cell.hv[j].x);
-                        hvy = bswap_float(cell.hv[j].y);
-                        hvz = bswap_float(cell.hv[j].z);
-                        vx  = bswap_float(cell.v[j].x);
-                        vy  = bswap_float(cell.v[j].y);
-                        vz  = bswap_float(cell.v[j].z);
+                px  = bswap_float(cell.p[j].x);
+                py  = bswap_float(cell.p[j].y);
+                pz  = bswap_float(cell.p[j].z);
+                hvx = bswap_float(cell.hv[j].x);
+                hvy = bswap_float(cell.hv[j].y);
+                hvz = bswap_float(cell.hv[j].z);
+                vx  = bswap_float(cell.v[j].x);
+                vy  = bswap_float(cell.v[j].y);
+                vz  = bswap_float(cell.v[j].z);
 
-                        fwrite((char *)&px,  4,1,file);
-                        fwrite((char *)&py,  4,1,file);
-                        fwrite((char *)&pz,  4,1,file);
-                        fwrite((char *)&hvx, 4,1,file);
-                        fwrite((char *)&hvy, 4,1,file);
-                        fwrite((char *)&hvz, 4,1,file);
-                        fwrite((char *)&vx,  4,1,file);
-                        fwrite((char *)&vy,  4,1,file);
-                        fwrite((char *)&vz,  4,1,file);
-                    } else {
-                        fwrite((char *)&cell.p[j].x,  4,1,file);
-                        fwrite((char *)&cell.p[j].y,  4,1,file);
-                        fwrite((char *)&cell.p[j].z,  4,1,file);
-                        fwrite((char *)&cell.hv[j].x, 4,1,file);
-                        fwrite((char *)&cell.hv[j].y, 4,1,file);
-                        fwrite((char *)&cell.hv[j].z, 4,1,file);
-                        fwrite((char *)&cell.v[j].x,  4,1,file);
-                        fwrite((char *)&cell.v[j].y,  4,1,file);
-                        fwrite((char *)&cell.v[j].z,  4,1,file);
-                    }
-                    ++count;
-		}
-	}
+                fwrite((char *)&px,  4,1,file);
+                fwrite((char *)&py,  4,1,file);
+                fwrite((char *)&pz,  4,1,file);
+                fwrite((char *)&hvx, 4,1,file);
+                fwrite((char *)&hvy, 4,1,file);
+                fwrite((char *)&hvz, 4,1,file);
+                fwrite((char *)&vx,  4,1,file);
+                fwrite((char *)&vy,  4,1,file);
+                fwrite((char *)&vz,  4,1,file);
+            } else {
+                fwrite((char *)&cell.p[j].x,  4,1,file);
+                fwrite((char *)&cell.p[j].y,  4,1,file);
+                fwrite((char *)&cell.p[j].z,  4,1,file);
+                fwrite((char *)&cell.hv[j].x, 4,1,file);
+                fwrite((char *)&cell.hv[j].y, 4,1,file);
+                fwrite((char *)&cell.hv[j].z, 4,1,file);
+                fwrite((char *)&cell.v[j].x,  4,1,file);
+                fwrite((char *)&cell.v[j].y,  4,1,file);
+                fwrite((char *)&cell.v[j].z,  4,1,file);
+            }
+            */
+            ++count;
+        }
+    }
     assert(count == numParticles);
 
     int numSkipped = origNumParticles - numParticles;
@@ -643,22 +640,39 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     int iy;
     int iz;
 
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    int nz = blockDim.z * gridDim.z;
+    /* cuda-memcheck says:
+      Invalid __global__ write of size 4
+      at 0x00000688 in big_kernel
+      by thread (0,1,20) in block (1,0,0)
+      Address 0xcad31ce8 is out of bounds
 
-    ix = blockIdx.x * blockDim.x + threadIdx.x;
-    iy = blockIdx.y * blockDim.y + threadIdx.y;
-    iz = blockIdx.z * blockDim.z + threadIdx.z;
+      ////////////////////////////////////////
 
-    printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
-    printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
-    printf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
+      geometry info:
+      grid (16, 16, 1) block (2, 2, 45)
+
+      size info:
+      numCells = 46080
+    */
+
+    int nx = blockDim.x * gridDim.x;  //32
+    int ny = blockDim.y * gridDim.y;  //45
+    int nz = blockDim.z * gridDim.z;  //32
+
+    ix = blockIdx.x * blockDim.x + threadIdx.x;  //2
+    iy = blockIdx.y * blockDim.y + threadIdx.y;  //1
+    iz = blockIdx.z * blockDim.z + threadIdx.z;  //20
+
+    //printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
+    //printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
+    //printf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
 
     //move common declarations on top
 
-    int index = (iz*ny + iy)*nx + ix;
+    int index = (iz*ny + iy)*nx + ix; //(20*45 + 1)*32 + 2 = 28834
     int np;  //internal loop limit
+
+    //assert(index < 46080);
 
     //this should be moved to shared memory
     Cell &cell = cells[index];  //just a reference to the correspondig cell //FIXME
@@ -738,8 +752,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
             //np_renamed = cnumPars[index2]++;
             //pthread_mutex_unlock(&mutex[index2][0]);
 
-            //use atomic
-            atomicAdd(&cnumPars[index2],1);
+            //use //atomic
+            //atomicAdd(&cnumPars[index2],1);
         } else {
             cnumPars[index2]++;
         }
@@ -855,8 +869,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //cell.density[j] += tc;
                             //pthread_mutex_unlock(&mutex[index][j]);
 
-                            //use atomic
-                            atomicAdd(&cell.density[j],tc);
+                            //use //atomic
+                            //atomicAdd(&cell.density[j],tc);
                         } else {
                             cell.density[j] += tc;
                         }
@@ -868,8 +882,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //neigh.density[iparNeigh] += tc;
                             //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
 
-                            //use atomic
-                            atomicAdd(&neigh.density[iparNeigh],tc);
+                            //use //atomic
+                            //atomicAdd(&neigh.density[iparNeigh],tc);
                         } else {
                             neigh.density[iparNeigh] += tc;
                         }
@@ -985,11 +999,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //cell.a[j] += acc;
                             //pthread_mutex_unlock(&mutex[index][j]);
 
-                            //use atomics
+                            //use //atomics
                             //this works because no one reads these values at the moment ??
-                            atomicAdd(&cell.a[j].x,acc.x);
-                            atomicAdd(&cell.a[j].y,acc.y);
-                            atomicAdd(&cell.a[j].z,acc.z);
+                            //atomicAdd(&cell.a[j].x,acc.x);
+                            //atomicAdd(&cell.a[j].y,acc.y);
+                            //atomicAdd(&cell.a[j].z,acc.z);
                         } else {
                             operator_add(&cell.a[j],&cell.a[j],&acc);
                         }
@@ -1001,16 +1015,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //neigh.a[iparNeigh] -= acc;
                             //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
 
-                            //use atomics
+                            //use //atomics
                             //this works because no one reads these values at the moment ??
-
-                            //#warning uncomment me
-                            //atomicSub(&neigh.a[iparNeigh].x,acc.x);
-                            //atomicSub(&neigh.a[iparNeigh].y,acc.y);
-                            //atomicSub(&neigh.a[iparNeigh].z,acc.z);
-                            atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
-                            atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
-                            atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+                            //atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
+                            //atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
+                            //atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
                         } else {
                             operator_sub(&neigh.a[iparNeigh],&neigh.a[iparNeigh],&acc);
                         }
@@ -1151,13 +1160,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void test() {
-    printf("hello\n");
-    //printf("hello from: block (%d, %d, %d) thread (%d, %d, %d)\n",
-    //       blockIdx.x,blockIdx.y,blockIdx.z,
-    //       threadIdx.x,threadIdx.y,threadIdx.z);
-}
-
 int main(int argc, char *argv[]) {
     int i;
 
@@ -1168,9 +1170,6 @@ int main(int argc, char *argv[]) {
     int block_x;
     int block_y;
     int block_z;
-
-    test<<<10,10>>>();
-    exit(0);
 
     if (argc < 4 || argc >= 6) {
         printf("Usage: %s <threadnum> <framenum> <.fluid input file> [.fluid output file]\n",argv[0]);
@@ -1208,19 +1207,31 @@ int main(int argc, char *argv[]) {
     block_y = ny;
     block_z = nz / ZDIVS;
 
-    //should check for max grid size and block size from deviceQuery //FIXME
-
     //kernel stuff
-    dim3 grid(grid_x, grid_y, grid_z);
-    dim3 block(block_x, block_y, block_z);
+    //dim3 grid(grid_x, grid_y, grid_z);
+    //dim3 block(block_x, block_y, block_z);
+
+    dim3 grid(grid_z, grid_x, grid_y);
+    dim3 block(block_z, block_x, block_y);
+
+    //dim3 grid(1,1,1);
+    //dim3 block(8,8,8);
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
+    printf("grid (%d, %d, %d) block (%d, %d, %d)\n",
+           grid.x,grid.y,grid.z,block.x,block.y,block.z);
+
     for (i=0;i<framenum;i++) {
-        //test<<<grid,block>>>();
-        //big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,dev);
+        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,dev);
+        cudaError_t err = cudaGetLastError();
+        if( cudaSuccess != err) {
+            printf("Cuda error: line %d: %s.\n", __LINE__, cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
+
         cudaDeviceSynchronize();
     }
 
