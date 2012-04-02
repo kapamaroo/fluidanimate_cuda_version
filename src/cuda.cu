@@ -189,20 +189,21 @@ int *h_cnumPars;
 Cell *h_cells2;
 int *h_cnumPars2;
 
-//bool *border;			// flags which cells lie on grid boundaries
+char *border;			// flags which cells lie on grid boundaries
+char *d_border;
 
 int XDIVS = 1;	// number of partitions in X
 int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
-/*
+/**/
 struct Grid
 {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-*/
+/**/
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -257,7 +258,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(XDIVS * ZDIVS == threadnum);
     */
 
-    //    grids = new struct Grid[NUM_GRIDS];
+    grids = (struct Grid*)malloc(NUM_GRIDS*sizeof(struct Grid));
 
     //Load input particles
 
@@ -313,7 +314,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
-    /* this determines the size of the grid (in gpu world these are the blocks)
+    /* this determines the size of the grid (in gpu world these are the blocks) */
 
     int gi = 0;
     int sx, sz, ex, ez;
@@ -321,41 +322,45 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     for (int i = 0; i < XDIVS; ++i)
 	{
             sx = ex;
-            ex = int(float(h_nx)/float(XDIVS) * (i+1) + 0.5f);
+            ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
             assert(sx < ex);
 
             ez = 0;
             for (int j = 0; j < ZDIVS; ++j, ++gi)
 		{
                     sz = ez;
-                    ez = int(float(h_nz)/float(ZDIVS) * (j+1) + 0.5f);
+                    ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
                     assert(sz < ez);
 
                     grids[gi].sx = sx;
                     grids[gi].ex = ex;
                     grids[gi].sy = 0;
-                    grids[gi].ey = h_ny;
+                    grids[gi].ey = ny;
                     grids[gi].sz = sz;
                     grids[gi].ez = ez;
 		}
 	}
     assert(gi == NUM_GRIDS);
-    */
+    /**/
 
 
     /* we do not need to keep information about the borders anymore,
      * every block in the GPU knows its limits from the builtin
      * variables (blockIdx, threadIdx, etc.)
+     */
 
-
-    border = new bool[numCells];
+    border = (char*)malloc(numCells*sizeof(char));
     for (int i = 0; i < NUM_GRIDS; ++i)
         for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
             for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
                 for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
                     {
+                        printf("limits: (%d..%d, %d..%d, %d..%d)\n",
+                               grids[i].sx,grids[i].ex,
+                               grids[i].sy,grids[i].ey,
+                               grids[i].sz,grids[i].ez,);
                         int index = (iz*ny + iy)*nx + ix;
-                        border[index] = false;
+                        border[index] = 0;
                         for (int dk = -1; dk <= 1; ++dk)
                             for (int dj = -1; dj <= 1; ++dj)
                                 for (int di = -1; di <= 1; ++di)
@@ -371,10 +376,14 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                                         if ( ci < grids[i].sx || ci >= grids[i].ex ||
                                             cj < grids[i].sy || cj >= grids[i].ey ||
                                             ck < grids[i].sz || ck >= grids[i].ez )
-                                            border[index] = true;
+                                            border[index] = 1;
                                     }
                     }
-    */
+    /**/
+
+    //    for (int i=0;i<numCells;i++) {
+    //        printf("%d ",border[i]);
+    //    }
 
     //device memory
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
@@ -383,12 +392,17 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&d_border, numCells * sizeof(char)) );
+    CudaSafeCall ( __LINE__, cudaMemcpy(d_border, border, numCells*sizeof(char), cudaMemcpyHostToDevice) );
+
+    assert(border && d_border);
+
     //host memory
     h_cells = (struct Cell*)malloc(numCells * sizeof(struct Cell));
     h_cnumPars = (int*)calloc(numCells,sizeof(int));
 
-    h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
-    h_cnumPars2 = (int*)calloc(numCells,sizeof(int));  //new int[numCells];
+    h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));
+    h_cnumPars2 = (int*)calloc(numCells,sizeof(int));
 
     assert(cells && cnumPars);
     assert(cells2 && cnumPars2);
@@ -581,7 +595,12 @@ void CleanUpSim()
     free(h_cells2);
     free(h_cnumPars2);
 
+    free(grids);
+    free(border);
+
     //free device memory
+    CudaSafeCall( __LINE__, cudaFree(d_border) );
+
     CudaSafeCall( __LINE__, cudaFree(dev) );
 
     CudaSafeCall( __LINE__, cudaFree(cells) );
@@ -600,9 +619,12 @@ void CleanUpSim()
 #define GET_IDX_Y(idx) (SKIP_DIM_X(idx) % (blockDim.y * gridDim.y))
 #define GET_IDX_Z(idx) ((SKIP_DIM_X(idx) - GET_IDX_Y(idx)) / (blockDim.y * gridDim.y))
 
-#define BLOCK_BORDER_X(ix) ((ix != 0) && (ix % blockDim.x == 0))
-#define BLOCK_BORDER_Y(iy) ((iy != 0) && (iy % blockDim.y == 0))
-#define BLOCK_BORDER_Z(iz) ((iz != 0) && (iz % blockDim.z == 0))
+
+// ((iz) < blockIdx.z*blockDim.z || (iz) >= (blockIdx.z+1)*blockDim.z) )
+//( ((ix)==0 && blockIdx.x) || (ix)==(blockDim.x - 1))
+#define BLOCK_BORDER_X(ix) (!(ix))
+#define BLOCK_BORDER_Y(iy) (!(iy))
+#define BLOCK_BORDER_Z(iz) (!(iz))
 
 //fast, we use this if we know the indices of each dimension
 #define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || \
@@ -643,7 +665,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev) {
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev,char *d_border) {
 
     int ix;
     int iy;
@@ -672,7 +694,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     int neighCells[27];
 
     //it is safe to move the call here, neighbours do not change between the two original calls
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells,cnumPars);
 
     //move this computation to cpu
     //const float tc_orig = hSq*hSq*hSq;
@@ -682,13 +703,42 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     const float stiffness = 30000.f;
     const float damping = 128.f;
 
+    int i;
+    size_t size = 46080;
 
+    //printf("size in kernel is : %lu\n",size);
 
+    if (index==0) {
+        for (i=0;i<size;i++) {
+            //printf("border %d: %d\n",i,d_border[i]);
+            if (d_border[i] && !INDEX_IS_BORDER(i)) {
+                printf("missed border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
+            }
+
+            if (!d_border[i] && INDEX_IS_BORDER(i)) {
+                printf("false border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
+            }
+        }
+    }
+
+    /*
+    for (i=0;i<27;i++) {
+        neighCells[i] = 0xffffffff;
+    }
+    */
+    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells,cnumPars);
+
+    /*
+    //printf("thread %d: number of neighbors: %d\n",index,numNeighCells);
+    for (int i=0;i<numNeighCells;i++) {
+        printf("thread %d : %d-th neighbor %d\n",index,i,neighCells[i]);
+    }
+    */
     ////////////////////////////////////////////////////////////////////////////////
     //void ClearParticlesMT(int i) {
     ////////////////////////////////////////////////////////////////////////////////
 
-
+    /*
 
 
     //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
@@ -723,6 +773,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
+
     for (int j = 0; j < np2; ++j) {
         int ci = (int)((cell2.p[j].x - domainMin.x) / dev->delta.x);
         int cj = (int)((cell2.p[j].y - domainMin.y) / dev->delta.y);
@@ -862,6 +913,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         }
                     }
                 }
+            ;
         }
 
     //                }  //close nested loops
@@ -869,8 +921,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
     __syncthreads();
-
-
 
 
     //} close ComputeDensitiesMT()
@@ -1111,7 +1161,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     //} close AdvanceParticlesMT()
     ////////////////////////////////////////////////////////////////////////////////
 
-
+    */
 
 
 } //close big_kernel()
@@ -1166,11 +1216,11 @@ int main(int argc, char *argv[]) {
     block_z = nz / ZDIVS;
 
     //kernel stuff
-    //dim3 grid(grid_x, grid_y, grid_z);
-    //dim3 block(block_x, block_y, block_z);
+    dim3 grid(grid_x, grid_y, grid_z);
+    dim3 block(block_x, block_y, block_z);
 
-    dim3 grid(grid_z, grid_x, grid_y);
-    dim3 block(block_z, block_x, block_y);
+    //dim3 grid(grid_z, grid_x, grid_y);
+    //dim3 block(block_z, block_x, block_y);
 
     //dim3 grid(1,1,1);
     //dim3 block(8,8,8);
@@ -1183,7 +1233,7 @@ int main(int argc, char *argv[]) {
            grid.x,grid.y,grid.z,block.x,block.y,block.z);
 
     for (i=0;i<framenum;i++) {
-        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,dev);
+        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,dev,d_border);
         cudaError_t err = cudaGetLastError();
         if( cudaSuccess != err) {
             printf("Cuda error: line %d: %s.\n", __LINE__, cudaGetErrorString(err));
