@@ -641,28 +641,13 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     int iy;
     int iz;
 
-    /* cuda-memcheck says:
-      Invalid __global__ write of size 4
-      at 0x00000688 in big_kernel
-      by thread (0,1,20) in block (1,0,0)
-      Address 0xcad31ce8 is out of bounds
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
 
-      ////////////////////////////////////////
-
-      geometry info:
-      grid (16, 16, 1) block (2, 2, 45)
-
-      size info:
-      numCells = 46080
-    */
-
-    int nx = blockDim.x * gridDim.x;  //32
-    int ny = blockDim.y * gridDim.y;  //45
-    int nz = blockDim.z * gridDim.z;  //32
-
-    ix = blockIdx.x * blockDim.x + threadIdx.x;  //2
-    iy = blockIdx.y * blockDim.y + threadIdx.y;  //1
-    iz = blockIdx.z * blockDim.z + threadIdx.z;  //20
+    ix = blockIdx.x * blockDim.x + threadIdx.x;
+    iy = blockIdx.y * blockDim.y + threadIdx.y;
+    iz = blockIdx.z * blockDim.z + threadIdx.z;
 
     //printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
     //printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
@@ -670,10 +655,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     //move common declarations on top
 
-    int index = (iz*ny + iy)*nx + ix; //(20*45 + 1)*32 + 2 = 28834
+    int index = (iz*ny + iy)*nx + ix;
     int np;  //internal loop limit
-
-    //assert(index < 46080);
 
     //this should be moved to shared memory
     Cell &cell = cells[index];  //just a reference to the correspondig cell //FIXME
