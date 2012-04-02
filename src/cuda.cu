@@ -150,7 +150,10 @@ const float domainMax_z = 0.065f;
 
 float restParticlesPerMeter;
 
-__device__ float h;
+__device__
+//__constant__
+float h;
+
 __device__ float hSq;
 __device__ float tc_orig;
 
@@ -172,15 +175,18 @@ int numParticles = 0;
 int numCells = 0;
 
 //device memory
-__device__ Cell *cells = 0;
-__device__ int *cnumPars = 0;
+Cell *cells;
+int *cnumPars;
 
-__device__ Cell *cells2 = 0;
-__device__ int *cnumPars2 = 0;
+Cell *cells2;
+int *cnumPars2;
 
 //host memory
-Cell *h_cells2 = 0;
-int *h_cnumPars2 = 0;
+Cell *h_cells;
+int *h_cnumPars;
+
+Cell *h_cells2;
+int *h_cnumPars2;
 
 //bool *border;			// flags which cells lie on grid boundaries
 
@@ -245,7 +251,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     //Compute partitioning based on square root of number of threads
     //NOTE: Other partition sizes are possible as long as XDIVS * ZDIVS == threadnum,
     //      but communication is minimal (and hence optimal) if XDIVS == ZDIVS
-
 
     FILE *file;
     int lsb;
@@ -387,23 +392,33 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                     }
     */
 
-    //cells = new Cell[numCells];
-    //cnumPars = new int[numCells];
-
+    //device memory
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
 
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-    //these should be tranfered to device after initialisation
+    //host memory
+    h_cells = (struct Cell*)malloc(numCells * sizeof(struct Cell));
+    h_cnumPars = (int*)calloc(numCells,sizeof(int));
+
     h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
     h_cnumPars2 = (int*)calloc(numCells,sizeof(int));  //new int[numCells];
 
-    assert(cells && cells2 && cnumPars && cnumPars2 && h_cells2 && h_cnumPars2);
+    assert(cells && cnumPars);
+    assert(cells2 && cnumPars2);
+    assert(h_cells && h_cnumPars);
+    assert(h_cells2 && h_cnumPars2);
+
+    printf("sizeof(struct Cell) * numCells : %d * %d = %d\n",sizeof(struct Cell), numCells,sizeof(struct Cell)*numCells);
+    printf("sizeof(int) * numCells : %d * %d = %d\n",sizeof(int), numCells,sizeof(int)*numCells);
+    printf("total device memory: %d\n",2*numCells*(sizeof(struct Cell)+sizeof(int)));
+
+    assert(2*numCells*(sizeof(struct Cell)+sizeof(int))< 536543232); //my card has 512MB of global memory
 
     //we used calloc instead
-    //memset(cnumPars2, 0, numCells*sizeof(int));
+    //memset(h_cnumPars2, 0, numCells*sizeof(int));
 
     float px, py, pz, hvx, hvy, hvz, vx, vy, vz;
     for (int i = 0; i < origNumParticles; ++i)
@@ -500,8 +515,8 @@ void SaveFile(char const *fileName)
     for (int i = 0; i < numCells; ++i)
 	{
 #warning reminder: we use the same host buffer for input and output
-            Cell const &cell = h_cells2[i];
-            int np = h_cnumPars2[i];
+            Cell const &cell = h_cells[i];
+            int np = h_cnumPars[i];
             for (int j = 0; j < np; ++j)
 		{
                     if (!isLittleEndian()) {
@@ -588,7 +603,7 @@ void CleanUpSim()
 
 #define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || BLOCK_BORDER_Y(iy) || BLOCK_BORDER_Z(iz))
 
-__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
+__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
     int numNeighCells = 0;
 
     int nx = blockDim.x * gridDim.x;
@@ -626,7 +641,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel() {
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
 
     int ix;
     int iy;
@@ -655,7 +670,7 @@ __global__ void big_kernel() {
     int neighCells[27];
 
     //it is safe to move the call here, neighbours do not change between the two original calls
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells,cnumPars);
 
     //move this computation to cpu
     //const float tc_orig = hSq*hSq*hSq;
@@ -1141,6 +1156,8 @@ __global__ void big_kernel() {
 ////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char *argv[]) {
+    int i;
+
     int grid_x;
     int grid_y;
     int grid_z;
@@ -1188,23 +1205,21 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    //read input file, allocate memory, etc
     InitSim(argv[3], threadnum);
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
-
-    //cuda wrapper
-    for (int i = 0; i < framenum; ++i) {
-        big_kernel<<<grid,block>>>();
+    for (i=0;i<framenum;i++) {
+        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
         cudaDeviceSynchronize();
     }
 
     //move data to host
-    /*** ATTENTION !!! we use the same host buffer ***/
-    CudaSafeCall( __LINE__, cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
-    CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
     if (argc > 4) {
         SaveFile(argv[4]);
