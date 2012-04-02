@@ -142,6 +142,7 @@ struct Cell
     Vec3 v[16];
     Vec3 a[16];
     float density[16];
+    //int debug[16];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -706,6 +707,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     //    int index = (iz*ny + iy)*nx + ix;
 
     cnumPars[index] = 0;
+    //cnumPars[index] = index;
 
     //                }  //close nested loop;
 
@@ -773,6 +775,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         cell_renamed.v[np_renamed].x = cell2.v[j].x;
         cell_renamed.v[np_renamed].y = cell2.v[j].y;
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
+        //cell_renamed.debug[np_renamed] = index2;
     }
 
     //                }  //close nested loops
@@ -851,6 +854,14 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
+
+
+
+#warning index may be negative (if neighbor is border) FIXME
+            indexNeigh = (indexNeigh>=0) ? indexNeigh : -indexNeigh;
+
+
+
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
@@ -964,6 +975,14 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
+
+
+
+#warning index may be negative (if neighbor is border) FIXME
+            indexNeigh = (indexNeigh>=0) ? indexNeigh : -indexNeigh;
+
+
+
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
@@ -1238,6 +1257,19 @@ int main(int argc, char *argv[]) {
     //move data to host
     CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
     CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
+
+    /*debug
+    int j;
+    for (i=0;i<numCells;i++) {
+        //if (h_cnumPars[i]!=i) { printf("got %d : expected : %d\n",h_cnumPars[i],i); }
+        for (j=0;j<h_cnumPars[i];j++) {
+            if (h_cells[i].debug[j] >= numCells) {
+                printf("in cell %d: particle %d: index2 out of bounds: %d\n",
+                                                          i,j,h_cells[i].debug[j]);
+            }
+        }
+    }
+    */
 
     if (argc > 4) {
         SaveFile(argv[4]);
