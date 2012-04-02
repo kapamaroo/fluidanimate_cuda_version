@@ -189,8 +189,8 @@ int *h_cnumPars;
 Cell *h_cells2;
 int *h_cnumPars2;
 
-char *border;			// flags which cells lie on grid boundaries
-char *d_border;
+int *border;			// flags which cells lie on grid boundaries
+int *d_border;
 
 int XDIVS = 1;	// number of partitions in X
 int ZDIVS = 1;	// number of partitions in Z
@@ -349,16 +349,13 @@ void InitSim(char const *fileName, unsigned int threadnum) {
      * variables (blockIdx, threadIdx, etc.)
      */
 
-    border = (char*)malloc(numCells*sizeof(char));
-    for (int i = 0; i < NUM_GRIDS; ++i)
+    border = (int*)malloc(numCells*sizeof(int));
+    for (int i = 0; i < NUM_GRIDS; ++i) {
+        printf("limits: (%d..%d, %d..%d, %d..%d)\n",grids[i].sx,grids[i].ex,grids[i].sy,grids[i].ey,grids[i].sz,grids[i].ez);
         for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
             for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
                 for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
                     {
-                        printf("limits: (%d..%d, %d..%d, %d..%d)\n",
-                               grids[i].sx,grids[i].ex,
-                               grids[i].sy,grids[i].ey,
-                               grids[i].sz,grids[i].ez,);
                         int index = (iz*ny + iy)*nx + ix;
                         border[index] = 0;
                         for (int dk = -1; dk <= 1; ++dk)
@@ -379,6 +376,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                                             border[index] = 1;
                                     }
                     }
+    }
     /**/
 
     //    for (int i=0;i<numCells;i++) {
@@ -392,8 +390,8 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-    CudaSafeCall( __LINE__, cudaMalloc((void**)&d_border, numCells * sizeof(char)) );
-    CudaSafeCall ( __LINE__, cudaMemcpy(d_border, border, numCells*sizeof(char), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&d_border, numCells * sizeof(int)) );
+    CudaSafeCall ( __LINE__, cudaMemcpy(d_border, border, numCells*sizeof(int), cudaMemcpyHostToDevice) );
 
     assert(border && d_border);
 
@@ -619,12 +617,15 @@ void CleanUpSim()
 #define GET_IDX_Y(idx) (SKIP_DIM_X(idx) % (blockDim.y * gridDim.y))
 #define GET_IDX_Z(idx) ((SKIP_DIM_X(idx) - GET_IDX_Y(idx)) / (blockDim.y * gridDim.y))
 
+#define GET_THREAD_IDX_X(ix) (GET_IDX_X(ix) % blockDim.x)
+#define GET_THREAD_IDX_Y(ix) (GET_IDX_Y(iy) % blockDim.y)
+#define GET_THREAD_IDX_Z(ix) (GET_IDX_Z(iz) % blockDim.z)
 
 // ((iz) < blockIdx.z*blockDim.z || (iz) >= (blockIdx.z+1)*blockDim.z) )
 //( ((ix)==0 && blockIdx.x) || (ix)==(blockDim.x - 1))
-#define BLOCK_BORDER_X(ix) (!(ix))
-#define BLOCK_BORDER_Y(iy) (!(iy))
-#define BLOCK_BORDER_Z(iz) (!(iz))
+#define BLOCK_BORDER_X(ix) ((blockIdx.x && !(ix)) || (ix)==(blockDim.x - 1))
+#define BLOCK_BORDER_Y(iy) ((blockIdx.y && !(iy)) || (iy)==(blockDim.y - 1))
+#define BLOCK_BORDER_Z(iz) ((blockIdx.z && !(iz)) || (iz)==(blockDim.z - 1))
 
 //fast, we use this if we know the indices of each dimension
 #define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || \
@@ -632,9 +633,9 @@ void CleanUpSim()
                              BLOCK_BORDER_Z(iz))
 
 //a slower version of IS_BORDER() when we don't know the indices of each dimension (mostly for neighbor indices)
-#define INDEX_IS_BORDER(idx) ( IS_BORDER( GET_IDX_X(idx), \
-                                          GET_IDX_Y(idx), \
-                                          GET_IDX_Z(idx) ) )
+#define INDEX_IS_BORDER(idx) ( IS_BORDER( GET_THREAD_IDX_X(idx), \
+                                          GET_THREAD_IDX_Y(idx), \
+                                          GET_THREAD_IDX_Z(idx) ) )
 
 __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
     int numNeighCells = 0;
@@ -665,7 +666,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev,char *d_border) {
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev,int *d_border) {
 
     int ix;
     int iy;
@@ -712,13 +713,16 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         for (i=0;i<size;i++) {
             //printf("border %d: %d\n",i,d_border[i]);
             if (d_border[i] && !INDEX_IS_BORDER(i)) {
-                printf("missed border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
+                //printf("missed border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
             }
 
             if (!d_border[i] && INDEX_IS_BORDER(i)) {
-                printf("false border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
+                //printf("false border (%d,%d,%d)\n",GET_IDX_X(i),GET_IDX_Y(i),GET_IDX_X(i),i);
             }
+
+            cnumPars[i] = INDEX_IS_BORDER(index) ? 1 : 0;
         }
+
     }
 
     /*
@@ -1247,18 +1251,21 @@ int main(int argc, char *argv[]) {
     CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
     CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
-    /*debug
+    //    /*debug
     int j;
     for (i=0;i<numCells;i++) {
         //if (h_cnumPars[i]!=i) { printf("got %d : expected : %d\n",h_cnumPars[i],i); }
-        for (j=0;j<h_cnumPars[i];j++) {
+        /*for (j=0;j<h_cnumPars[i];j++) {
             if (h_cells[i].debug[j] >= numCells) {
                 printf("in cell %d: particle %d: index2 out of bounds: %d\n",
                                                           i,j,h_cells[i].debug[j]);
             }
+            }*/
+        if (border[i] != h_cnumPars[i]) {
+            printf("diff index %d\n",i);
         }
     }
-    */
+    //    */
 
     if (argc > 4) {
         SaveFile(argv[4]);
