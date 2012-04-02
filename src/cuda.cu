@@ -754,8 +754,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
             //np_renamed = cnumPars[index2]++;
             //pthread_mutex_unlock(&mutex[index2][0]);
 
-            //use //atomic
-            //atomicAdd(&cnumPars[index2],1);
+            //use atomic
+            atomicAdd(&cnumPars[index2],1);
         } else {
             cnumPars[index2]++;
         }
@@ -880,8 +880,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //cell.density[j] += tc;
                             //pthread_mutex_unlock(&mutex[index][j]);
 
-                            //use //atomic
-                            //atomicAdd(&cell.density[j],tc);
+                            //use atomic
+                            atomicAdd(&cell.density[j],tc);
                         } else {
                             cell.density[j] += tc;
                         }
@@ -893,8 +893,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //neigh.density[iparNeigh] += tc;
                             //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
 
-                            //use //atomic
-                            //atomicAdd(&neigh.density[iparNeigh],tc);
+                            //use atomic
+                            atomicAdd(&neigh.density[iparNeigh],tc);
                         } else {
                             neigh.density[iparNeigh] += tc;
                         }
@@ -1018,11 +1018,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //cell.a[j] += acc;
                             //pthread_mutex_unlock(&mutex[index][j]);
 
-                            //use //atomics
+                            //use atomics
                             //this works because no one reads these values at the moment ??
-                            //atomicAdd(&cell.a[j].x,acc.x);
-                            //atomicAdd(&cell.a[j].y,acc.y);
-                            //atomicAdd(&cell.a[j].z,acc.z);
+                            atomicAdd(&cell.a[j].x,acc.x);
+                            atomicAdd(&cell.a[j].y,acc.y);
+                            atomicAdd(&cell.a[j].z,acc.z);
                         } else {
                             operator_add(&cell.a[j],&cell.a[j],&acc);
                         }
@@ -1034,11 +1034,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             //neigh.a[iparNeigh] -= acc;
                             //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
 
-                            //use //atomics
+                            //use atomics
                             //this works because no one reads these values at the moment ??
-                            //atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
-                            //atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
-                            //atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+                            atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
+                            atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
+                            atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
                         } else {
                             operator_sub(&neigh.a[iparNeigh],&neigh.a[iparNeigh],&acc);
                         }
