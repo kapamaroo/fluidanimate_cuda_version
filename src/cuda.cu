@@ -10,6 +10,8 @@
 #include <assert.h>
 #include <cutil.h>
 
+#define CELL_PARTICLES 16
+
 void CudaSafeCall(int lineno, cudaError_t err) {
     //    cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
@@ -99,6 +101,8 @@ struct kernel_consts host;
 //device memory
 struct kernel_consts *dev;
 
+#warning we use dynamic memory here FIXME
+
 /*
 __device__ float h;
 __device__ float hSq;
@@ -131,18 +135,18 @@ __device__
 inline Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v)); }
 
 ////////////////////////////////////////////////////////////////////////////////
-// there is a current limitation of 16 particles per cell
+// there is a current limitation of CELL_PARTICLES particles per cell
 // (this structure use to be a simple linked-list of particles but, due to
 // improved cache locality, we get a huge performance increase by copying
 // particles instead of referencing them)
 struct Cell
 {
-    Vec3 p[16];
-    Vec3 hv[16];
-    Vec3 v[16];
-    Vec3 a[16];
-    float density[16];
-    //int debug[16];
+    Vec3 p[CELL_PARTICLES];
+    Vec3 hv[CELL_PARTICLES];
+    Vec3 v[CELL_PARTICLES];
+    Vec3 a[CELL_PARTICLES];
+    float density[CELL_PARTICLES];
+    //int debug[CELL_PARTICLES];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -253,7 +257,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(XDIVS * ZDIVS == threadnum);
     */
 
-    //    thread = new pthread_t[NUM_GRIDS];
     //    grids = new struct Grid[NUM_GRIDS];
 
     //Load input particles
@@ -437,7 +440,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
             Cell &cell = h_cells2[index];
 
             int np = h_cnumPars2[index];
-            if (np < 16)
+            if (np < CELL_PARTICLES)
 		{
                     cell.p[np].x = px;
                     cell.p[np].y = py;
@@ -509,7 +512,6 @@ void SaveFile(char const *fileName) {
         int np = h_cnumPars[i];
         //printf("np: %d\n",np);
         for (int j = 0; j < np; ++j) {
-            /*
             if (!isLittleEndian()) {
                 float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
 
@@ -543,7 +545,6 @@ void SaveFile(char const *fileName) {
                 fwrite((char *)&cell.v[j].y,  4,1,file);
                 fwrite((char *)&cell.v[j].z,  4,1,file);
             }
-            */
             ++count;
         }
     }
@@ -591,11 +592,27 @@ void CleanUpSim()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+//    idx = (iz*ny + iy)*nx + ix
+#define GET_IDX_X(idx) ((idx) % (blockDim.x * gridDim.x))
+#define SKIP_DIM_X(idx) (((idx) - GET_IDX_X(idx)) / (blockDim.x * gridDim.x))
+
+#define GET_IDX_Y(idx) (SKIP_DIM_X(idx) % (blockDim.y * gridDim.y))
+#define GET_IDX_Z(idx) ((SKIP_DIM_X(idx) - GET_IDX_Y(idx)) / (blockDim.y * gridDim.y))
+
 #define BLOCK_BORDER_X(ix) ((ix != 0) && (ix % blockDim.x == 0))
 #define BLOCK_BORDER_Y(iy) ((iy != 0) && (iy % blockDim.y == 0))
 #define BLOCK_BORDER_Z(iz) ((iz != 0) && (iz % blockDim.z == 0))
 
-#define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || BLOCK_BORDER_Y(iy) || BLOCK_BORDER_Z(iz))
+//fast, we use this if we know the indices of each dimension
+#define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || \
+                             BLOCK_BORDER_Y(iy) || \
+                             BLOCK_BORDER_Z(iz))
+
+//a slower version of IS_BORDER() when we don't know the indices of each dimension (mostly for neighbor indices)
+#define INDEX_IS_BORDER(idx) ( IS_BORDER( GET_IDX_X(idx), \
+                                          GET_IDX_Y(idx), \
+                                          GET_IDX_Z(idx) ) )
 
 __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
     int numNeighCells = 0;
@@ -606,29 +623,20 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
     for (int di = -1; di <= 1; ++di)
         for (int dj = -1; dj <= 1; ++dj)
-            for (int dk = -1; dk <= 1; ++dk)
-                {
-                    int ii = ci + di;
-                    int jj = cj + dj;
-                    int kk = ck + dk;
-                    if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
-                        {
-                            int index = (kk*ny + jj)*nx + ii;
+            for (int dk = -1; dk <= 1; ++dk) {
+                int ii = ci + di;
+                int jj = cj + dj;
+                int kk = ck + dk;
+                if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz) {
+                    int index = (kk*ny + jj)*nx + ii;
 
-                            //consider only cell neighbors who acltually have particles
-
-                            if (cnumPars[index] != 0)
-                                {
-                                    if (IS_BORDER(ci,cj,ck)) {
-                                        //pass negative value to determine the borders
-                                        neighCells[numNeighCells] = -index;
-                                    } else {
-                                        neighCells[numNeighCells] = index;
-                                    }
-                                    ++numNeighCells;
-                                }
-                        }
+                    //consider only cell neighbors who acltually have particles
+                    if (cnumPars[index] != 0) {
+                        neighCells[numNeighCells] = index;
+                    }
+                    ++numNeighCells;
                 }
+            }
 
     return numNeighCells;
 }
@@ -696,7 +704,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -729,23 +736,16 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         // this assumes that particles cannot travel more than one grid cell per time step
         int np_renamed = cnumPars[index2];
 
-        //use macro
-        //if (border[index2]) {
-
         if (IS_BORDER(ck,cj,ci)) {
-            //pthread_mutex_lock(&mutex[index2][0]);
-            //np_renamed = cnumPars[index2]++;
-            //pthread_mutex_unlock(&mutex[index2][0]);
-
             //use atomic
             atomicAdd(&cnumPars[index2],1);
         } else {
             cnumPars[index2]++;
         }
 
-        //#warning what if we exceed 16 particles per cell here??
+        //#warning what if we exceed CELL_PARTICLES particles per cell here??
         //from what I see is that we calculate the same frame over and over
-        //so every cell has at most 16 particles, from the initialisation
+        //so every cell has at most CELL_PARTICLES particles, from the initialisation
 
 
         Cell &cell_renamed = cells[index2];
@@ -765,7 +765,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -801,7 +800,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -837,14 +835,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
-
-
-
-#warning index may be negative (if neighbor is border) FIXME
-            indexNeigh = (indexNeigh>=0) ? indexNeigh : -indexNeigh;
-
-
-
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
@@ -857,25 +847,14 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         float t = dev->hSq - distSq;
                         float tc = t*t*t;
 
-                        //if (border[index]) {
                         if (IS_BORDER(ix,iy,iz)) {
-                            //pthread_mutex_lock(&mutex[index][j]);
-                            //cell.density[j] += tc;
-                            //pthread_mutex_unlock(&mutex[index][j]);
-
                             //use atomic
                             atomicAdd(&cell.density[j],tc);
                         } else {
                             cell.density[j] += tc;
                         }
 
-                        //if indexNeigh < 0 , cell is border
-                        //if (border[indexNeigh]) {
-                        if (indexNeigh<0) {
-                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            //neigh.density[iparNeigh] += tc;
-                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
-
+                        if (INDEX_IS_BORDER(indexNeigh)) {
                             //use atomic
                             atomicAdd(&neigh.density[iparNeigh],tc);
                         } else {
@@ -889,7 +868,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -924,7 +902,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -958,14 +935,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
-
-
-
-#warning index may be negative (if neighbor is border) FIXME
-            indexNeigh = (indexNeigh>=0) ? indexNeigh : -indexNeigh;
-
-
-
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
@@ -995,14 +964,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         operator_add(&acc,&acc,&tmp);
                         operator_div(&acc,&acc,cell.density[j] * neigh.density[iparNeigh]);
 
-                        //if (border[index]) {
                         if (IS_BORDER(ix,iy,iz)) {
-                            //pthread_mutex_lock(&mutex[index][j]);
-                            //cell.a[j] += acc;
-                            //pthread_mutex_unlock(&mutex[index][j]);
-
                             //use atomics
-                            //this works because no one reads these values at the moment ??
+#warning this works because no one reads these values at the moment ??
                             atomicAdd(&cell.a[j].x,acc.x);
                             atomicAdd(&cell.a[j].y,acc.y);
                             atomicAdd(&cell.a[j].z,acc.z);
@@ -1010,15 +974,10 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                             operator_add(&cell.a[j],&cell.a[j],&acc);
                         }
 
-                        //if indexNeigh < 0 , cell is border
-                        //if (border[indexNeigh]) {
-                        if (indexNeigh<0) {
-                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            //neigh.a[iparNeigh] -= acc;
-                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
-
+                        if (INDEX_IS_BORDER(indexNeigh)) {
                             //use atomics
-                            //this works because no one reads these values at the moment ??
+#warning this works because no one reads these values at the moment ??
+                            //reminder: there is no atomicSub for floats, so we add the negative value
                             atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                             atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                             atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
@@ -1033,7 +992,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -1096,7 +1054,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -1146,7 +1103,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
