@@ -1,5 +1,6 @@
 //Code originally written by Richard O. Lee
 //Modified by Christian Bienia and Christian Fensch
+//CUDA Version by Maroudas Manolis and Petros Kalos
 
 #include <cstdlib>
 #include <cstring>
@@ -8,18 +9,12 @@
 #include <fstream>
 #include <math.h>
 #include <stdint.h>
-//#include <pthread.h>
 #include <assert.h>
 #include <cutil.h>
 
-//#include "parsec_barrier.hpp"
-
-#ifdef ENABLE_PARSEC_HOOKS
-#include <hooks.h>
-#endif
+#define PARS_NUM 16
 
 void CudaSafeCall(int lineno, cudaError_t err) {
-    //    cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
         printf("Cuda error: line %d: %s.\n", lineno, cudaGetErrorString(err));
         exit(EXIT_FAILURE);
@@ -60,45 +55,44 @@ static inline int bswap_int32(int x) {
 
 // note: icc-optimized version of this class gave 15% more
 // performance than our hand-optimized SSE3 implementation
-class Vec3
-{
- public:
+class Vec3 {
+public:
     float x, y, z;
 
-__device__    Vec3() {}
-__device__ Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+    __device__ __host__    Vec3() {}
+    __device__ __host__    Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 
-__device__    float   GetLengthSq() const         { return x*x + y*y + z*z; }
-__device__    float   GetLength() const           { return sqrtf(GetLengthSq()); }
-__device__    Vec3 &  Normalize()                 { return *this /= GetLength(); }
+    __device__ __host__    float   GetLengthSq() const         { return x*x + y*y + z*z; }
+    __device__ __host__    float   GetLength() const           { return sqrtf(GetLengthSq()); }
+    __device__ __host__    Vec3 &  Normalize()                 { return *this /= GetLength(); }
 
-__device__    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
-__device__    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
-__device__    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
-__device__    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
+    __device__ __host__    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
+    __device__ __host__    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
+    __device__ __host__    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
+    __device__ __host__    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
 
-__device__    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
-__device__    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
-__device__    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
-__device__    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
-__device__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
+    __device__ __host__    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
+    __device__ __host__    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
+    __device__ __host__    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
+    __device__ __host__    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
+    __device__ __host__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
 
-__device__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
+    __device__ __host__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
 };
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// there is a current limitation of 16 particles per cell
+// there is a current limitation of PARS_NUM particles per cell
 // (this structure use to be a simple linked-list of particles but, due to
 // improved cache locality, we get a huge performance increase by copying
 // particles instead of referencing them)
 struct Cell
 {
-    Vec3 p[16];
-    Vec3 hv[16];
-    Vec3 v[16];
-    Vec3 a[16];
-    float density[16];
+    Vec3 p[PARS_NUM];
+    Vec3 hv[PARS_NUM];
+    Vec3 v[PARS_NUM];
+    Vec3 a[PARS_NUM];
+    float density[PARS_NUM];
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -109,23 +103,8 @@ const float kernelRadiusMultiplier = 1.695f;
 const float h_stiffness = 1.5f;
 const float viscosity = 0.4f;
 
-const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
 const Vec3 domainMax(0.065f, 0.1f, 0.065f);
-
-//device constants
-const float externalAcceleration_x = 0.f;
-const float externalAcceleration_y = -9.8f;
-const float externalAcceleration_z = 0.f;
-
-const float domainMin_x = -0.065f;
-const float domainMin_y = -0.08f;
-const float domainMin_z = -0.065f;
-
-const float domainMax_x = 0.065f;
-const float domainMax_y = 0.1f;
-const float domainMax_z = 0.065f;
-
 
 float restParticlesPerMeter;
 
@@ -136,61 +115,43 @@ __device__ float tc_orig;
 __device__ float densityCoeff;
 __device__ float pressureCoeff;
 __device__ float viscosityCoeff;
-
-// number of grid cells in each dimension
-int h_nx;
-int h_ny;
-int h_nz;
-
-__device__ int nx;
-__device__ int ny;
-__device__ int nz;
-
-__device__ float delta_x;
-__device__ float delta_y;
-__device__ float delta_z;
+__device__ Vec3 delta;
 
 int origNumParticles = 0;
 int numParticles = 0;
 int numCells = 0;
 
 //device memory
-__device__ Cell *cells = 0;
-__device__ int *cnumPars = 0;
+Cell *cells = 0;
+int *cnumPars = 0;
 
-__device__ Cell *cells2 = 0;
-__device__ int *cnumPars2 = 0;
+Cell *cells2 = 0;
+int *cnumPars2 = 0;
 
 //host memory
+Cell *h_cells = 0;
+int *h_cnumPars = 0;
+
 Cell *h_cells2 = 0;
 int *h_cnumPars2 = 0;
 
-//bool *border;			// flags which cells lie on grid boundaries
+// flags which cells lie on grid boundaries
+bool *border;
+
+int nx;
+int ny;
+int nz;
 
 int XDIVS = 1;	// number of partitions in X
 int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
-/*
 struct Grid
 {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-*/
-
-//pthread_attr_t attr;
-//pthread_t *thread;
-//pthread_mutex_t **mutex;	// used to lock cells in RebuildGrid and also particles in other functions
-//pthread_barrier_t barrier;	// global barrier used by all threads
-
-/*
-typedef struct __thread_args {
-    int tid;			//thread id, determines work partition
-    int frames;			//number of frames to compute
-} thread_args;			//arguments for threads
-*/
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -239,13 +200,10 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     XDIVS = 1<<(lsb/2);
     ZDIVS = 1<<(lsb/2);
 
-    /*
     if (XDIVS*ZDIVS != threadnum) XDIVS*=2;
     assert(XDIVS * ZDIVS == threadnum);
-    */
 
-    //    thread = new pthread_t[NUM_GRIDS];
-    //    grids = new struct Grid[NUM_GRIDS];
+    grids = new struct Grid[NUM_GRIDS];
 
     //Load input particles
     std::cout << "Loading file \"" << fileName << "\"..." << std::endl;
@@ -275,66 +233,49 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float h_pressureCoeff = 3.f*coeff2 * 0.5f*h_stiffness * particleMass;
     float h_viscosityCoeff = viscosity * coeff3 * particleMass;
 
-    //Vec3 range = domainMax - domainMin;
-    float range_x = domainMax_x - domainMin_x;
-    float range_y = domainMax_y - domainMin_y;
-    float range_z = domainMax_z - domainMin_z;
+    Vec3 range = domainMax - domainMin;
 
-    h_nx = (int)(range_x / h_h);
-    h_ny = (int)(range_y / h_h);
-    h_nz = (int)(range_z / h_h);
+    nx = (int)(range.x / h_h);
+    ny = (int)(range.y / h_h);
+    nz = (int)(range.z / h_h);
 
-    assert(h_nx >= 1 && h_ny >= 1 && h_nz >= 1);
+    assert(nx >= 1 && ny >= 1 && nz >= 1);
 
-    numCells = h_nx*h_ny*h_nz;
+    numCells = nx * ny * nz;
     std::cout << "Number of cells: " << numCells << std::endl;
 
-    //Vec3 h_delta;
-    float h_delta_x = range_x / h_nx;
-    float h_delta_y = range_y / h_ny;
-    float h_delta_z = range_z / h_nz;
+    Vec3 h_delta;
+    h_delta.x = range.x / nx;
+    h_delta.y = range.y / ny;
+    h_delta.z = range.z / nz;
 
-    assert(h_delta_x >= h_h && h_delta_y >= h_h && h_delta_z >= h_h);
-    assert(h_nx >= XDIVS && h_nz >= ZDIVS);
-
-    /* this determines the size of the grid (in gpu world these are the blocks)
-     * but as we see every block has the same size:
-     * dim_x = nx / XDIVS
-     * dim_y = ny          //no tiling in this dimension
-     * dim_z = nz / ZDIVS
+    assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
+    assert(nx >= XDIVS && nz >= ZDIVS);
 
     int gi = 0;
     int sx, sz, ex, ez;
     ex = 0;
-    for (int i = 0; i < XDIVS; ++i)
-	{
-            sx = ex;
-            ex = int(float(h_nx)/float(XDIVS) * (i+1) + 0.5f);
-            assert(sx < ex);
+    for (int i = 0; i < XDIVS; ++i) {
+        sx = ex;
+        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
+        assert(sx < ex);
 
-            ez = 0;
-            for (int j = 0; j < ZDIVS; ++j, ++gi)
-		{
-                    sz = ez;
-                    ez = int(float(h_nz)/float(ZDIVS) * (j+1) + 0.5f);
-                    assert(sz < ez);
+        ez = 0;
+        for (int j = 0; j < ZDIVS; ++j, ++gi) {
+            sz = ez;
+            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
+            assert(sz < ez);
 
-                    grids[gi].sx = sx;
-                    grids[gi].ex = ex;
-                    grids[gi].sy = 0;
-                    grids[gi].ey = h_ny;
-                    grids[gi].sz = sz;
-                    grids[gi].ez = ez;
-		}
-	}
+            grids[gi].sx = sx;
+            grids[gi].ex = ex;
+            grids[gi].sy = 0;
+            grids[gi].ey = ny;
+            grids[gi].sz = sz;
+            grids[gi].ez = ez;
+        }
+    }
+
     assert(gi == NUM_GRIDS);
-    */
-
-
-    /* we do not need to keep information about the borders anymore,
-     * every block in the GPU knows its limits from the builtin
-     * variables (blockIdx, threadIdx, etc.)
-
 
     border = new bool[numCells];
     for (int i = 0; i < NUM_GRIDS; ++i)
@@ -362,25 +303,12 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                                             border[index] = true;
                                     }
                     }
-    */
 
-    /*
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    h_cells = new Cell[numCells];
+    h_cnumPars = new int[numCells];
 
-    mutex = new pthread_mutex_t *[numCells];
-    for (int i = 0; i < numCells; ++i)
-	{
-            int n = (border[i] ? 16 : 1);
-            mutex[i] = new pthread_mutex_t[n];
-            for (int j = 0; j < n; ++j)
-                pthread_mutex_init(&mutex[i][j], NULL);
-	}
-    pthread_barrier_init(&barrier, NULL, NUM_GRIDS);
-    */
-
-    //cells = new Cell[numCells];
-    //cnumPars = new int[numCells];
+    h_cells2 = new Cell[numCells];
+    h_cnumPars2 = new int[numCells];
 
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
@@ -388,79 +316,70 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-    //these should be tranfered to device after initialisation
-    h_cells2 = (struct Cell*)malloc(numCells * sizeof(struct Cell));  //new Cell[numCells];
-    h_cnumPars2 = (int*)calloc(numCells,sizeof(int));  //new int[numCells];
+    assert(h_cells && h_cnumPars);
+    assert(h_cells2 && h_cnumPars2);
+    assert(cells && cnumPars);
+    assert(cells2 && cnumPars2);
 
-    assert(cells && cells2 && cnumPars && cnumPars2 && h_cells2 && h_cnumPars2);
-
-    //we used calloc instead
-    //memset(cnumPars2, 0, numCells*sizeof(int));
+    memset(h_cnumPars2, 0, numCells*sizeof(int));
 
     float px, py, pz, hvx, hvy, hvz, vx, vy, vz;
-    for (int i = 0; i < origNumParticles; ++i)
-	{
-            file.read((char *)&px, 4);
-            file.read((char *)&py, 4);
-            file.read((char *)&pz, 4);
-            file.read((char *)&hvx, 4);
-            file.read((char *)&hvy, 4);
-            file.read((char *)&hvz, 4);
-            file.read((char *)&vx, 4);
-            file.read((char *)&vy, 4);
-            file.read((char *)&vz, 4);
-            if (!isLittleEndian()) {
-                px  = bswap_float(px);
-                py  = bswap_float(py);
-                pz  = bswap_float(pz);
-                hvx = bswap_float(hvx);
-                hvy = bswap_float(hvy);
-                hvz = bswap_float(hvz);
-                vx  = bswap_float(vx);
-                vy  = bswap_float(vy);
-                vz  = bswap_float(vz);
-            }
+    for (int i = 0; i < origNumParticles; ++i) {
+        file.read((char *)&px, 4);
+        file.read((char *)&py, 4);
+        file.read((char *)&pz, 4);
+        file.read((char *)&hvx, 4);
+        file.read((char *)&hvy, 4);
+        file.read((char *)&hvz, 4);
+        file.read((char *)&vx, 4);
+        file.read((char *)&vy, 4);
+        file.read((char *)&vz, 4);
+        if (!isLittleEndian()) {
+            px  = bswap_float(px);
+            py  = bswap_float(py);
+            pz  = bswap_float(pz);
+            hvx = bswap_float(hvx);
+            hvy = bswap_float(hvy);
+            hvz = bswap_float(hvz);
+            vx  = bswap_float(vx);
+            vy  = bswap_float(vy);
+            vz  = bswap_float(vz);
+        }
 
-            int ci = (int)((px - domainMin.x) / h_delta_x);
-            int cj = (int)((py - domainMin.y) / h_delta_y);
-            int ck = (int)((pz - domainMin.z) / h_delta_z);
+        int ci = (int)((px - domainMin.x) / h_delta.x);
+        int cj = (int)((py - domainMin.y) / h_delta.y);
+        int ck = (int)((pz - domainMin.z) / h_delta.z);
 
-            if (ci < 0) ci = 0; else if (ci > (h_nx-1)) ci = nx-1;
-            if (cj < 0) cj = 0; else if (cj > (h_ny-1)) cj = ny-1;
-            if (ck < 0) ck = 0; else if (ck > (h_nz-1)) ck = nz-1;
+        if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
+        if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
+        if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
 
-            int index = (ck*h_ny + cj)*h_nx + ci;
-            Cell &cell = h_cells2[index];
+        int index = (ck*ny + cj)*nx + ci;
+        Cell &cell = h_cells2[index];
 
-            int np = h_cnumPars2[index];
-            if (np < 16)
-		{
-                    cell.p[np].x = px;
-                    cell.p[np].y = py;
-                    cell.p[np].z = pz;
-                    cell.hv[np].x = hvx;
-                    cell.hv[np].y = hvy;
-                    cell.hv[np].z = hvz;
-                    cell.v[np].x = vx;
-                    cell.v[np].y = vy;
-                    cell.v[np].z = vz;
-                    ++h_cnumPars2[index];
-		}
-            else
-                --numParticles;
-	}
+        int np = h_cnumPars2[index];
+        if (np < PARS_NUM) {
+            cell.p[np].x = px;
+            cell.p[np].y = py;
+            cell.p[np].z = pz;
+            cell.hv[np].x = hvx;
+            cell.hv[np].y = hvy;
+            cell.hv[np].z = hvz;
+            cell.v[np].x = vx;
+            cell.v[np].y = vy;
+            cell.v[np].z = vz;
+            ++h_cnumPars2[index];
+        }
+        else
+            --numParticles;
+    }
 
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nx", &h_nx, sizeof(int), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("ny", &h_ny, sizeof(int), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("nz", &h_nz, sizeof(int), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_x", &h_delta_x, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_y", &h_delta_y, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta_z", &h_delta_z, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
 
     std::cout << "Number of particles: " << numParticles << " (" << origNumParticles-numParticles << " skipped)" << std::endl;
@@ -468,8 +387,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void SaveFile(char const *fileName)
-{
+void SaveFile(char const *fileName) {
     std::cout << "Saving file \"" << fileName << "\"..." << std::endl;
 
     std::ofstream file(fileName, std::ios::binary);
@@ -489,49 +407,47 @@ void SaveFile(char const *fileName)
     }
 
     int count = 0;
-    for (int i = 0; i < numCells; ++i)
-	{
-#warning reminder: we use the same host buffer for input and output
-            Cell const &cell = h_cells2[i];
-            int np = h_cnumPars2[i];
-            for (int j = 0; j < np; ++j)
-		{
-                    if (!isLittleEndian()) {
-                        float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
+    for (int i = 0; i < numCells; ++i) {
+        Cell const &cell = h_cells[i];
+        int np = h_cnumPars[i];
+        for (int j = 0; j < np; ++j) {
+            if (!isLittleEndian()) {
+                float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
 
-                        px  = bswap_float(cell.p[j].x);
-                        py  = bswap_float(cell.p[j].y);
-                        pz  = bswap_float(cell.p[j].z);
-                        hvx = bswap_float(cell.hv[j].x);
-                        hvy = bswap_float(cell.hv[j].y);
-                        hvz = bswap_float(cell.hv[j].z);
-                        vx  = bswap_float(cell.v[j].x);
-                        vy  = bswap_float(cell.v[j].y);
-                        vz  = bswap_float(cell.v[j].z);
+                px  = bswap_float(cell.p[j].x);
+                py  = bswap_float(cell.p[j].y);
+                pz  = bswap_float(cell.p[j].z);
+                hvx = bswap_float(cell.hv[j].x);
+                hvy = bswap_float(cell.hv[j].y);
+                hvz = bswap_float(cell.hv[j].z);
+                vx  = bswap_float(cell.v[j].x);
+                vy  = bswap_float(cell.v[j].y);
+                vz  = bswap_float(cell.v[j].z);
 
-                        file.write((char *)&px,  4);
-                        file.write((char *)&py,  4);
-                        file.write((char *)&pz,  4);
-                        file.write((char *)&hvx, 4);
-                        file.write((char *)&hvy, 4);
-                        file.write((char *)&hvz, 4);
-                        file.write((char *)&vx,  4);
-                        file.write((char *)&vy,  4);
-                        file.write((char *)&vz,  4);
-                    } else {
-                        file.write((char *)&cell.p[j].x,  4);
-                        file.write((char *)&cell.p[j].y,  4);
-                        file.write((char *)&cell.p[j].z,  4);
-                        file.write((char *)&cell.hv[j].x, 4);
-                        file.write((char *)&cell.hv[j].y, 4);
-                        file.write((char *)&cell.hv[j].z, 4);
-                        file.write((char *)&cell.v[j].x,  4);
-                        file.write((char *)&cell.v[j].y,  4);
-                        file.write((char *)&cell.v[j].z,  4);
-                    }
-                    ++count;
-		}
-	}
+                file.write((char *)&px,  4);
+                file.write((char *)&py,  4);
+                file.write((char *)&pz,  4);
+                file.write((char *)&hvx, 4);
+                file.write((char *)&hvy, 4);
+                file.write((char *)&hvz, 4);
+                file.write((char *)&vx,  4);
+                file.write((char *)&vy,  4);
+                file.write((char *)&vz,  4);
+            } else {
+                file.write((char *)&cell.p[j].x,  4);
+                file.write((char *)&cell.p[j].y,  4);
+                file.write((char *)&cell.p[j].z,  4);
+                file.write((char *)&cell.hv[j].x, 4);
+                file.write((char *)&cell.hv[j].y, 4);
+                file.write((char *)&cell.hv[j].z, 4);
+                file.write((char *)&cell.v[j].x,  4);
+                file.write((char *)&cell.v[j].y,  4);
+                file.write((char *)&cell.v[j].z,  4);
+            }
+            ++count;
+        }
+    }
+
     assert(count == numParticles);
 
     int numSkipped = origNumParticles - numParticles;
@@ -540,67 +456,45 @@ void SaveFile(char const *fileName)
         zero = bswap_float(zero);
     }
 
-    for (int i = 0; i < numSkipped; ++i)
-	{
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-            file.write((char *)&zero, 4);
-	}
+    for (int i = 0; i < numSkipped; ++i) {
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+        file.write((char *)&zero, 4);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void CleanUpSim()
-{
-    /*
-    pthread_attr_destroy(&attr);
+void CleanUpSim() {
+    delete[] border;
+    delete[] grids;
 
-    for (int i = 0; i < numCells; ++i)
-	{
-            int n = (border[i] ? 16 : 1);
-            for (int j = 0; j < n; ++j)
-                pthread_mutex_destroy(&mutex[i][j]);
-            delete[] mutex[i];
-	}
-    pthread_barrier_destroy(&barrier);
-    delete[] mutex;
-    */
+    delete[] h_cells;
+    delete[] h_cnumPars;
 
-    //delete[] border;
-    //delete[] cells;
-    //delete[] cnumPars;
+    delete[] h_cells2;
+    delete[] h_cnumPars2;
 
-    //free host memory
-    free(h_cells2);
-    free(h_cnumPars2);
-
-    //free device memory
     CudaSafeCall( __LINE__, cudaFree(cells) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars) );
 
     CudaSafeCall( __LINE__, cudaFree(cells2) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
-
-    //delete[] cells2;
-    //delete[] cnumPars2;
-    //delete[] thread;
-    //delete[] grids;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-#define BLOCK_BORDER_X(ix) ((ix != 0) && (ix % blockDim.x == 0))
-#define BLOCK_BORDER_Y(iy) ((iy != 0) && (iy % blockDim.y == 0))
-#define BLOCK_BORDER_Z(iz) ((iz != 0) && (iz % blockDim.z == 0))
 
-#define IS_BORDER(ix,iy,iz) (BLOCK_BORDER_X(ix) || BLOCK_BORDER_Y(iy) || BLOCK_BORDER_Z(iz))
+__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars,bool *border) {
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
 
-__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
     int numNeighCells = 0;
 
     for (int di = -1; di <= 1; ++di)
@@ -618,10 +512,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
 
                             if (cnumPars[index] != 0)
                                 {
-                                    if (IS_BORDER(ci,cj,ck)) {
-                                        //pass negative value to determine the borders
-                                        neighCells[numNeighCells] = -index;
-                                    } else {
+                                    if (border[index]) {
                                         neighCells[numNeighCells] = index;
                                     }
                                     ++numNeighCells;
@@ -634,32 +525,22 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel() {
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,bool *border) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    int ix;
-    int iy;
-    int iz;
-
-    ix = blockIdx.x * blockDim.x + threadIdx.x;
-    iy = blockIdx.y * blockDim.y + threadIdx.y;
-    iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
-    printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
-    printf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
 
     //move common declarations on top
 
     int index = (iz*ny + iy)*nx + ix;
-    int np = 0;  //internal loop limit
 
-    //this should be moved to shared memory
-    Cell &cell = cells[index];  //just a pointer to the correspondig cell //FIXME
+    Cell &cell = cells[index];
 
     int neighCells[27];
-
-    //it is safe to move the call here, neighbours do not change between the two original calls
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
 
     //move this computation to cpu
     //const float tc_orig = hSq*hSq*hSq;
@@ -668,6 +549,10 @@ __global__ void big_kernel() {
     const float epsilon = 1e-10f;
     const float stiffness = 30000.f;
     const float damping = 128.f;
+    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
+    const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
+    const Vec3 domainMax(0.065f, 0.1f, 0.065f);
+
 
 
 
@@ -690,7 +575,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -711,9 +595,9 @@ __global__ void big_kernel() {
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int ci = (int)((cell2.p[j].x - domainMin_x) / delta_x);
-        int cj = (int)((cell2.p[j].y - domainMin_y) / delta_y);
-        int ck = (int)((cell2.p[j].z - domainMin_z) / delta_z);
+        int ci = (int)((cell2.p[j].x - domainMin.x) / delta.x);
+        int cj = (int)((cell2.p[j].y - domainMin.y) / delta.y);
+        int ck = (int)((cell2.p[j].z - domainMin.z) / delta.z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -724,22 +608,16 @@ __global__ void big_kernel() {
         int np_renamed;
 
         //use macro
-        //if (border[index2]) {
-
-        if (IS_BORDER(ck,cj,ci)) {
-            //pthread_mutex_lock(&mutex[index2][0]);
-            //np_renamed = cnumPars[index2]++;
-            //pthread_mutex_unlock(&mutex[index2][0]);
-
+        if (border[index2]) {
             //use atomic
             atomicAdd(&cnumPars[index2],1);
         } else {
             np_renamed = cnumPars[index2]++;
         }
 
-        //#warning what if we exceed 16 particles per cell here??
+        //#warning what if we exceed PARS_NUM particles per cell here??
         //from what I see is that we calculate the same frame over and over
-        //so every cell has at most 16 particles, from the initialisation
+        //so every cell has at most PARS_NUM particles, from the initialisation
 
 
         Cell &cell_renamed = cells[index2];
@@ -758,7 +636,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -769,7 +646,7 @@ __global__ void big_kernel() {
     //void InitDensitiesAndForcesMT(int i) {
 
     //from now on we don't change the cnumPars[index]
-    np = cnumPars[index];  //internal loop limit
+    int np = cnumPars[index];  //internal loop limit
 
 
     //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
@@ -784,9 +661,7 @@ __global__ void big_kernel() {
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] = 0.f;
-        cell.a[j].x = externalAcceleration_x;
-        cell.a[j].y = externalAcceleration_y;
-        cell.a[j].z = externalAcceleration_z;
+        cell.a[j] = externalAcceleration;
     }
 
 
@@ -794,7 +669,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -825,6 +699,8 @@ __global__ void big_kernel() {
 
     //    Cell &cell = cells[index];
 
+    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars,border);
+
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
@@ -837,25 +713,14 @@ __global__ void big_kernel() {
                         float t = hSq - distSq;
                         float tc = t*t*t;
 
-                        //if (border[index]) {
-                        if (IS_BORDER(ix,iy,iz)) {
-                            //pthread_mutex_lock(&mutex[index][j]);
-                            //cell.density[j] += tc;
-                            //pthread_mutex_unlock(&mutex[index][j]);
-
+                        if (border[index]) {
                             //use atomic
                             atomicAdd(&cell.density[j],tc);
                         } else {
                             cell.density[j] += tc;
                         }
 
-                        //if indexNeigh < 0 , cell is border
-                        //if (border[indexNeigh]) {
-                        if (indexNeigh<0) {
-                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            //neigh.density[iparNeigh] += tc;
-                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
-
+                        if (border[indexNeigh]) {
                             //use atomic
                             atomicAdd(&neigh.density[iparNeigh],tc);
                         } else {
@@ -869,7 +734,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -904,7 +768,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -955,12 +818,7 @@ __global__ void big_kernel() {
                         acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
                         acc /= cell.density[j] * neigh.density[iparNeigh];
 
-                        //if (border[index]) {
-                        if (IS_BORDER(ix,iy,iz)) {
-                            //pthread_mutex_lock(&mutex[index][j]);
-                            //cell.a[j] += acc;
-                            //pthread_mutex_unlock(&mutex[index][j]);
-
+                        if (border[index]) {
                             //use atomics
                             //this works because no one reads these values at the moment ??
                             atomicAdd(&cell.a[j].x,acc.x);
@@ -970,20 +828,9 @@ __global__ void big_kernel() {
                             cell.a[j] += acc;
                         }
 
-                        //if indexNeigh < 0 , cell is border
-                        //if (border[indexNeigh]) {
-                        if (indexNeigh<0) {
-                            //pthread_mutex_lock(&mutex[-indexNeigh][iparNeigh]);
-                            //neigh.a[iparNeigh] -= acc;
-                            //pthread_mutex_unlock(&mutex[-indexNeigh][iparNeigh]);
-
+                        if (border[indexNeigh]) {
                             //use atomics
                             //this works because no one reads these values at the moment ??
-
-                            //#warning uncomment me
-                            //atomicSub(&neigh.a[iparNeigh].x,acc.x);
-                            //atomicSub(&neigh.a[iparNeigh].y,acc.y);
-                            //atomicSub(&neigh.a[iparNeigh].z,acc.z);
                             atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                             atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                             atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
@@ -998,7 +845,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -1029,27 +875,27 @@ __global__ void big_kernel() {
     for (int j = 0; j < np; ++j) {
         Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
 
-        float diff = parSize - (pos.x - domainMin_x);
+        float diff = parSize - (pos.x - domainMin.x);
         if (diff > epsilon)
             cell.a[j].x += stiffness*diff - damping*cell.v[j].x;
 
-        diff = parSize - (domainMax_x - pos.x);
+        diff = parSize - (domainMax.x - pos.x);
         if (diff > epsilon)
             cell.a[j].x -= stiffness*diff + damping*cell.v[j].x;
 
-        diff = parSize - (pos.y - domainMin_y);
+        diff = parSize - (pos.y - domainMin.y);
         if (diff > epsilon)
             cell.a[j].y += stiffness*diff - damping*cell.v[j].y;
 
-        diff = parSize - (domainMax_y - pos.y);
+        diff = parSize - (domainMax.y - pos.y);
         if (diff > epsilon)
             cell.a[j].y -= stiffness*diff + damping*cell.v[j].y;
 
-        diff = parSize - (pos.z - domainMin_z);
+        diff = parSize - (pos.z - domainMin.z);
         if (diff > epsilon)
             cell.a[j].z += stiffness*diff - damping*cell.v[j].z;
 
-        diff = parSize - (domainMax_z - pos.z);
+        diff = parSize - (domainMax.z - pos.z);
         if (diff > epsilon)
             cell.a[j].z -= stiffness*diff + damping*cell.v[j].z;
     }
@@ -1058,7 +904,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -1093,7 +938,6 @@ __global__ void big_kernel() {
 
 
 
-    //pthread_barrier_wait(&barrier);
     __syncthreads();
 
 
@@ -1107,16 +951,9 @@ __global__ void big_kernel() {
 
 } //close big_kernel()
 
-//void AdvanceFrameMT(int i) {
-void AdvanceFrameMT() {
+////////////////////////////////////////////////////////////////////////////////
 
-    //common loops in all functions
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
-
-
+int main(int argc, char *argv[]) {
     int grid_x;
     int grid_y;
     int grid_z;
@@ -1130,64 +967,10 @@ void AdvanceFrameMT() {
     // block_y should be ny          //no partitioning here
     // block_z should be nz / ZDIVS
 
-    grid_x = XDIVS;
-    grid_y = 1;      //no partitioning here
-    grid_z = ZDIVS;
-
-    block_x = h_nx / XDIVS;
-    block_y = h_ny;
-    block_z = h_nz / ZDIVS;
-
-    //should check for max grid size and block size from deviceQuery //FIXME
-
-    //kernel stuff
-    dim3 grid(grid_x, grid_y, grid_z);
-    dim3 block(block_x, block_y, block_z);
-
-    big_kernel<<<grid,block>>>();
-    cudaDeviceSynchronize();
-
-    //ClearParticlesMT(i);          pthread_barrier_wait(&barrier);
-    //RebuildGridMT(i);             pthread_barrier_wait(&barrier);
-    //InitDensitiesAndForcesMT(i);  pthread_barrier_wait(&barrier);
-    //ComputeDensitiesMT(i);        pthread_barrier_wait(&barrier);
-    //ComputeDensities2MT(i);       pthread_barrier_wait(&barrier);
-    //ComputeForcesMT(i);           pthread_barrier_wait(&barrier);
-    //ProcessCollisionsMT(i);       pthread_barrier_wait(&barrier);
-    //AdvanceParticlesMT(i);        pthread_barrier_wait(&barrier);
-}
-
-//void *AdvanceFramesMT(void *args) {
-void *AdvanceFramesMT(int frames) {
-    //    thread_args *targs = (thread_args *)args;
-
-    //    for (int i = 0; i < targs->frames; ++i)
-    for (int i = 0; i < frames; ++i)
-        //AdvanceFrameMT(targs->tid);
-        AdvanceFrameMT();
-
-    return NULL;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-int main(int argc, char *argv[]) {
-#ifdef PARSEC_VERSION
-#define __PARSEC_STRING(x) #x
-#define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
-    std::cout << "PARSEC Benchmark Suite Version "__PARSEC_XSTRING(PARSEC_VERSION) << std::endl << std::flush;
-#else
-    std::cout << "PARSEC Benchmark Suite" << std::endl << std::flush;
-#endif //PARSEC_VERSION
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_bench_begin(__parsec_fluidanimate);
-#endif
-
-    if (argc < 4 || argc >= 6)
-	{
-            std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
-            return -1;
-	}
+    if (argc < 4 || argc >= 6) {
+        std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
+        exit(EXIT_FAILURE);
+    }
 
     int threadnum = atoi(argv[1]);
     int framenum = atoi(argv[2]);
@@ -1196,60 +979,54 @@ int main(int argc, char *argv[]) {
 
     if (threadnum < 1) {
         std::cerr << "<threadnum> must at least be 1" << std::endl;
-        return -1;
+        exit(EXIT_FAILURE);
     }
 
     if (framenum < 1) {
         std::cerr << "<framenum> must at least be 1" << std::endl;
-        return -1;
+        exit(EXIT_FAILURE);
     }
 
     InitSim(argv[3], threadnum);
 
-    //    thread_args targs[threadnum];
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_roi_begin();
-#endif
-    /*    for (int i = 0; i < threadnum; ++i) {
-        targs[i].tid = i;
-        targs[i].frames = framenum;
-        pthread_create(&thread[i], &attr, AdvanceFramesMT, &targs[i]);
-    }
-    // *** PARALLEL PHASE *** //
-    for (int i = 0; i < threadnum; ++i) {
-        pthread_join(thread[i], NULL);
-    }
-    */
+    grid_x = XDIVS;
+    grid_y = 1;      //no partitioning here
+    grid_z = ZDIVS;
 
+    block_x = nx / XDIVS;
+    block_y = ny;
+    block_z = nz / ZDIVS;
+
+    //should check for max grid size and block size from deviceQuery //FIXME
+
+    //kernel stuff
+    dim3 grid(grid_x, grid_y, grid_z);
+    dim3 block(block_x, block_y, block_z);
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
-
-    //cuda wrapper
-    AdvanceFramesMT(framenum);
+    for (int i = 0; i < framenum; ++i) {
+        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,border);
+        cudaError_t err = cudaGetLastError();
+        if( cudaSuccess != err) {
+            printf("Cuda error: %s.\n", cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
+        cudaDeviceSynchronize();
+    }
 
     //move data to host
-    /*** ATTENTION !!! we use the same host buffer ***/
-    CudaSafeCall( __LINE__, cudaMemcpy(h_cells2, cells2, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
-    CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars2, cnumPars2, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
-
-
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_roi_end();
-#endif
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
     if (argc > 4)
         SaveFile(argv[4]);
 
     CleanUpSim();
 
-#ifdef ENABLE_PARSEC_HOOKS
-    __parsec_bench_end();
-#endif
-
-    return 0;
+    exit(EXIT_SUCCESS);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
