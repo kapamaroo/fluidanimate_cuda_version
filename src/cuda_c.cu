@@ -1,6 +1,5 @@
 //Code originally written by Richard O. Lee
 //Modified by Christian Bienia and Christian Fensch
-//CUDA Version by Maroudas Manolis and Petros Kalos
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,13 +10,10 @@
 #include <assert.h>
 #include <cutil.h>
 
-<<<<<<< HEAD:src/cuda.cu
-#define PARS_NUM 16
-=======
 #define CELL_PARTICLES 16
->>>>>>> c_version:src/cuda_c.cu
 
 void CudaSafeCall(int lineno, cudaError_t err) {
+    //    cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
         printf("Cuda error: line %d: %s.\n", lineno, cudaGetErrorString(err));
         exit(EXIT_FAILURE);
@@ -57,36 +53,31 @@ static inline int bswap_int32(int x) {
 ////////////////////////////////////////////////////////////////////////////////
 // note: icc-optimized version of this class gave 15% more
 // performance than our hand-optimized SSE3 implementation
-<<<<<<< HEAD:src/cuda.cu
-class Vec3 {
-public:
-=======
 
 /*
 class Vec3 {
  public:
->>>>>>> c_version:src/cuda_c.cu
     float x, y, z;
 
-    __device__ __host__    Vec3() {}
-    __device__ __host__    Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+__device__    Vec3() {}
+__device__ Vec3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 
-    __device__ __host__    float   GetLengthSq() const         { return x*x + y*y + z*z; }
-    __device__ __host__    float   GetLength() const           { return sqrtf(GetLengthSq()); }
-    __device__ __host__    Vec3 &  Normalize()                 { return *this /= GetLength(); }
+__device__    float   GetLengthSq() const         { return x*x + y*y + z*z; }
+__device__    float   GetLength() const           { return sqrtf(GetLengthSq()); }
+__device__    Vec3 &  Normalize()                 { return *this /= GetLength(); }
 
-    __device__ __host__    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
-    __device__ __host__    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
-    __device__ __host__    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
-    __device__ __host__    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
+__device__    Vec3 &  operator += (Vec3 const &v) { x += v.x;  y += v.y; z += v.z; return *this; }
+__device__    Vec3 &  operator -= (Vec3 const &v) { x -= v.x;  y -= v.y; z -= v.z; return *this; }
+__device__    Vec3 &  operator *= (float s)       { x *= s;  y *= s; z *= s; return *this; }
+__device__    Vec3 &  operator /= (float s)       { x /= s;  y /= s; z /= s; return *this; }
 
-    __device__ __host__    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
-    __device__ __host__    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
-    __device__ __host__    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
-    __device__ __host__    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
-    __device__ __host__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
+__device__    Vec3    operator + (Vec3 const &v) const    { return Vec3(x+v.x, y+v.y, z+v.z); }
+__device__    Vec3    operator - () const                 { return Vec3(-x, -y, -z); }
+__device__    Vec3    operator - (Vec3 const &v) const    { return Vec3(x-v.x, y-v.y, z-v.z); }
+__device__    Vec3    operator * (float s) const          { return Vec3(x*s, y*s, z*s); }
+__device__    Vec3    operator / (float s) const          { return Vec3(x/s, y/s, z/s); }
 
-    __device__ __host__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
+__device__    float   operator * (Vec3 const &v) const    { return x*v.x + y*v.y + z*v.z; }
 };
 */
 
@@ -112,9 +103,6 @@ struct kernel_consts *dev;
 
 #warning we use dynamic memory here FIXME
 
-<<<<<<< HEAD:src/cuda.cu
-// there is a current limitation of PARS_NUM particles per cell
-=======
 /*
 __device__ float h;
 __device__ float hSq;
@@ -148,26 +136,17 @@ inline Vec3   *Normalize(Vec3 *v)          { return operator_div(v,v,GetLength(v
 
 ////////////////////////////////////////////////////////////////////////////////
 // there is a current limitation of CELL_PARTICLES particles per cell
->>>>>>> c_version:src/cuda_c.cu
 // (this structure use to be a simple linked-list of particles but, due to
 // improved cache locality, we get a huge performance increase by copying
 // particles instead of referencing them)
 struct Cell
 {
-<<<<<<< HEAD:src/cuda.cu
-    Vec3 p[PARS_NUM];
-    Vec3 hv[PARS_NUM];
-    Vec3 v[PARS_NUM];
-    Vec3 a[PARS_NUM];
-    float density[PARS_NUM];
-=======
     Vec3 p[CELL_PARTICLES];
     Vec3 hv[CELL_PARTICLES];
     Vec3 v[CELL_PARTICLES];
     Vec3 a[CELL_PARTICLES];
     float density[CELL_PARTICLES];
     //int debug[CELL_PARTICLES];
->>>>>>> c_version:src/cuda_c.cu
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -178,21 +157,6 @@ const float kernelRadiusMultiplier = 1.695f;
 const float h_stiffness = 1.5f;
 const float viscosity = 0.4f;
 
-<<<<<<< HEAD:src/cuda.cu
-const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
-const Vec3 domainMax(0.065f, 0.1f, 0.065f);
-
-float restParticlesPerMeter;
-
-__device__ float h;
-__device__ float hSq;
-__device__ float tc_orig;
-
-__device__ float densityCoeff;
-__device__ float pressureCoeff;
-__device__ float viscosityCoeff;
-__device__ Vec3 delta;
-=======
 __device__ const Vec3 externalAcceleration = {0.f, -9.8f, 0.f};
 __device__ const Vec3 domainMin = {-0.065f, -0.08f, -0.065f};
 __device__ const Vec3 domainMax = { 0.065f, 0.1f, 0.065f };
@@ -206,34 +170,12 @@ float restParticlesPerMeter;
 int nx;
 int ny;
 int nz;
->>>>>>> c_version:src/cuda_c.cu
 
 int origNumParticles = 0;
 int numParticles = 0;
 int numCells = 0;
 
 //device memory
-<<<<<<< HEAD:src/cuda.cu
-Cell *cells = 0;
-int *cnumPars = 0;
-
-Cell *cells2 = 0;
-int *cnumPars2 = 0;
-
-//host memory
-Cell *h_cells = 0;
-int *h_cnumPars = 0;
-
-Cell *h_cells2 = 0;
-int *h_cnumPars2 = 0;
-
-// flags which cells lie on grid boundaries
-bool *border;
-
-int nx;
-int ny;
-int nz;
-=======
 Cell *cells;
 int *cnumPars;
 
@@ -250,26 +192,19 @@ int *h_cnumPars2;
 // flags which cells lie on grid boundaries
 int *h_border;
 int *border;
->>>>>>> c_version:src/cuda_c.cu
 
 int XDIVS = 1;	// number of partitions in X
 int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
-<<<<<<< HEAD:src/cuda.cu
-=======
 /**/
->>>>>>> c_version:src/cuda_c.cu
 struct Grid
 {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-<<<<<<< HEAD:src/cuda.cu
-=======
 /**/
->>>>>>> c_version:src/cuda_c.cu
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -319,14 +254,12 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     XDIVS = 1<<(lsb/2);
     ZDIVS = 1<<(lsb/2);
 
+    /*
     if (XDIVS*ZDIVS != threadnum) XDIVS*=2;
     assert(XDIVS * ZDIVS == threadnum);
+    */
 
-<<<<<<< HEAD:src/cuda.cu
-    grids = new struct Grid[NUM_GRIDS];
-=======
     grids = (struct Grid*)malloc(NUM_GRIDS*sizeof(struct Grid));
->>>>>>> c_version:src/cuda_c.cu
 
     //Load input particles
 
@@ -362,12 +295,8 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     float h_pressureCoeff = 3.f*coeff2 * 0.5f*h_stiffness * particleMass;
     float h_viscosityCoeff = viscosity * coeff3 * particleMass;
 
-<<<<<<< HEAD:src/cuda.cu
-    Vec3 range = domainMax - domainMin;
-=======
     Vec3 range;
     operator_sub(&range,&h_domainMax,&h_domainMin);
->>>>>>> c_version:src/cuda_c.cu
 
     nx = (int)(range.x / h_h);
     ny = (int)(range.y / h_h);
@@ -375,56 +304,22 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
     assert(nx >= 1 && ny >= 1 && nz >= 1);
 
-<<<<<<< HEAD:src/cuda.cu
-    numCells = nx * ny * nz;
-    std::cout << "Number of cells: " << numCells << std::endl;
-=======
     numCells = nx*ny*nz;
     printf("Number of cells: %d\n",numCells);
->>>>>>> c_version:src/cuda_c.cu
 
     Vec3 h_delta;
     h_delta.x = range.x / nx;
     h_delta.y = range.y / ny;
     h_delta.z = range.z / nz;
-<<<<<<< HEAD:src/cuda.cu
-
-    assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
-    assert(nx >= XDIVS && nz >= ZDIVS);
-=======
 
     assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
     /* this determines the size of the grid (in gpu world these are the blocks) */
->>>>>>> c_version:src/cuda_c.cu
 
     int gi = 0;
     int sx, sz, ex, ez;
     ex = 0;
-<<<<<<< HEAD:src/cuda.cu
-    for (int i = 0; i < XDIVS; ++i) {
-        sx = ex;
-        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
-        assert(sx < ex);
-
-        ez = 0;
-        for (int j = 0; j < ZDIVS; ++j, ++gi) {
-            sz = ez;
-            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
-            assert(sz < ez);
-
-            grids[gi].sx = sx;
-            grids[gi].ex = ex;
-            grids[gi].sy = 0;
-            grids[gi].ey = ny;
-            grids[gi].sz = sz;
-            grids[gi].ez = ez;
-        }
-    }
-
-    assert(gi == NUM_GRIDS);
-=======
     for (int i = 0; i < XDIVS; ++i)
 	{
             sx = ex;
@@ -448,7 +343,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 	}
     assert(gi == NUM_GRIDS);
     /**/
->>>>>>> c_version:src/cuda_c.cu
 
     h_border = (int*)malloc(numCells*sizeof(int));
     for (int i = 0; i < NUM_GRIDS; ++i) {
@@ -478,17 +372,8 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                                         }
                                     }
                     }
-<<<<<<< HEAD:src/cuda.cu
-
-    h_cells = new Cell[numCells];
-    h_cnumPars = new int[numCells];
-
-    h_cells2 = new Cell[numCells];
-    h_cnumPars2 = new int[numCells];
-=======
     }
     /**/
->>>>>>> c_version:src/cuda_c.cu
 
     //device memory
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
@@ -497,65 +382,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-<<<<<<< HEAD:src/cuda.cu
-    assert(h_cells && h_cnumPars);
-    assert(h_cells2 && h_cnumPars2);
-    assert(cells && cnumPars);
-    assert(cells2 && cnumPars2);
-
-    memset(h_cnumPars2, 0, numCells*sizeof(int));
-
-    float px, py, pz, hvx, hvy, hvz, vx, vy, vz;
-    for (int i = 0; i < origNumParticles; ++i) {
-        file.read((char *)&px, 4);
-        file.read((char *)&py, 4);
-        file.read((char *)&pz, 4);
-        file.read((char *)&hvx, 4);
-        file.read((char *)&hvy, 4);
-        file.read((char *)&hvz, 4);
-        file.read((char *)&vx, 4);
-        file.read((char *)&vy, 4);
-        file.read((char *)&vz, 4);
-        if (!isLittleEndian()) {
-            px  = bswap_float(px);
-            py  = bswap_float(py);
-            pz  = bswap_float(pz);
-            hvx = bswap_float(hvx);
-            hvy = bswap_float(hvy);
-            hvz = bswap_float(hvz);
-            vx  = bswap_float(vx);
-            vy  = bswap_float(vy);
-            vz  = bswap_float(vz);
-        }
-
-        int ci = (int)((px - domainMin.x) / h_delta.x);
-        int cj = (int)((py - domainMin.y) / h_delta.y);
-        int ck = (int)((pz - domainMin.z) / h_delta.z);
-
-        if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
-        if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
-        if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
-
-        int index = (ck*ny + cj)*nx + ci;
-        Cell &cell = h_cells2[index];
-
-        int np = h_cnumPars2[index];
-        if (np < PARS_NUM) {
-            cell.p[np].x = px;
-            cell.p[np].y = py;
-            cell.p[np].z = pz;
-            cell.hv[np].x = hvx;
-            cell.hv[np].y = hvy;
-            cell.hv[np].z = hvz;
-            cell.v[np].x = vx;
-            cell.v[np].y = vy;
-            cell.v[np].z = vz;
-            ++h_cnumPars2[index];
-        }
-        else
-            --numParticles;
-    }
-=======
     CudaSafeCall( __LINE__, cudaMalloc((void**)&border, numCells * sizeof(int)) );
     CudaSafeCall ( __LINE__, cudaMemcpy(border, h_border, numCells*sizeof(int), cudaMemcpyHostToDevice) );
 
@@ -634,7 +460,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
             else
                 --numParticles;
 	}
->>>>>>> c_version:src/cuda_c.cu
 
     fclose(file);
 
@@ -657,11 +482,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-<<<<<<< HEAD:src/cuda.cu
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
-=======
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(struct Vec3), 0, cudaMemcpyHostToDevice) );
->>>>>>> c_version:src/cuda_c.cu
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
     */
     printf("Number of particles: %d (%d) skipped\n",numParticles,origNumParticles-numParticles);
@@ -670,11 +491,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void SaveFile(char const *fileName) {
-<<<<<<< HEAD:src/cuda.cu
-    std::cout << "Saving file \"" << fileName << "\"..." << std::endl;
-=======
     printf("Saving file \"%s\"...\n", fileName);
->>>>>>> c_version:src/cuda_c.cu
 
     FILE *file;
     file = fopen(fileName,"wb+");
@@ -697,10 +514,7 @@ void SaveFile(char const *fileName) {
     for (int i = 0; i < numCells; ++i) {
         Cell const &cell = h_cells[i];
         int np = h_cnumPars[i];
-<<<<<<< HEAD:src/cuda.cu
-=======
         //printf("np: %d\n",np);
->>>>>>> c_version:src/cuda_c.cu
         for (int j = 0; j < np; ++j) {
             if (!isLittleEndian()) {
                 float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
@@ -715,27 +529,6 @@ void SaveFile(char const *fileName) {
                 vy  = bswap_float(cell.v[j].y);
                 vz  = bswap_float(cell.v[j].z);
 
-<<<<<<< HEAD:src/cuda.cu
-                file.write((char *)&px,  4);
-                file.write((char *)&py,  4);
-                file.write((char *)&pz,  4);
-                file.write((char *)&hvx, 4);
-                file.write((char *)&hvy, 4);
-                file.write((char *)&hvz, 4);
-                file.write((char *)&vx,  4);
-                file.write((char *)&vy,  4);
-                file.write((char *)&vz,  4);
-            } else {
-                file.write((char *)&cell.p[j].x,  4);
-                file.write((char *)&cell.p[j].y,  4);
-                file.write((char *)&cell.p[j].z,  4);
-                file.write((char *)&cell.hv[j].x, 4);
-                file.write((char *)&cell.hv[j].y, 4);
-                file.write((char *)&cell.hv[j].z, 4);
-                file.write((char *)&cell.v[j].x,  4);
-                file.write((char *)&cell.v[j].y,  4);
-                file.write((char *)&cell.v[j].z,  4);
-=======
                 fwrite((char *)&px,  4,1,file);
                 fwrite((char *)&py,  4,1,file);
                 fwrite((char *)&pz,  4,1,file);
@@ -755,15 +548,10 @@ void SaveFile(char const *fileName) {
                 fwrite((char *)&cell.v[j].x,  4,1,file);
                 fwrite((char *)&cell.v[j].y,  4,1,file);
                 fwrite((char *)&cell.v[j].z,  4,1,file);
->>>>>>> c_version:src/cuda_c.cu
             }
             ++count;
         }
     }
-<<<<<<< HEAD:src/cuda.cu
-
-=======
->>>>>>> c_version:src/cuda_c.cu
     assert(count == numParticles);
 
     int numSkipped = origNumParticles - numParticles;
@@ -772,19 +560,6 @@ void SaveFile(char const *fileName) {
         zero = bswap_float(zero);
     }
 
-<<<<<<< HEAD:src/cuda.cu
-    for (int i = 0; i < numSkipped; ++i) {
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-        file.write((char *)&zero, 4);
-    }
-=======
     for (int i = 0; i < numSkipped; ++i)
 	{
             fwrite((char *)&zero, 4,1,file);
@@ -800,22 +575,10 @@ void SaveFile(char const *fileName) {
 
     fflush(file);
     fclose(file);
->>>>>>> c_version:src/cuda_c.cu
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-<<<<<<< HEAD:src/cuda.cu
-void CleanUpSim() {
-    delete[] border;
-    delete[] grids;
-
-    delete[] h_cells;
-    delete[] h_cnumPars;
-
-    delete[] h_cells2;
-    delete[] h_cnumPars2;
-=======
 void CleanUpSim()
 {
     //free host memory
@@ -829,7 +592,6 @@ void CleanUpSim()
     CudaSafeCall( __LINE__, cudaFree(border) );
 
     CudaSafeCall( __LINE__, cudaFree(dev) );
->>>>>>> c_version:src/cuda_c.cu
 
     CudaSafeCall( __LINE__, cudaFree(cells) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars) );
@@ -840,13 +602,6 @@ void CleanUpSim()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-<<<<<<< HEAD:src/cuda.cu
-__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars,bool *border) {
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    int nz = blockDim.z * gridDim.z;
-
-=======
 //    idx = (iz*ny + iy)*nx + ix
 #define GET_IDX_X(idx) ((idx) % (blockDim.x * gridDim.x))
 #define SKIP_DIM_X(idx) (((idx) - GET_IDX_X(idx)) / (blockDim.x * gridDim.x))
@@ -855,7 +610,6 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 #define GET_IDX_Z(idx) ((SKIP_DIM_X(idx) - GET_IDX_Y(idx)) / (blockDim.y * gridDim.y))
 
 __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
->>>>>>> c_version:src/cuda_c.cu
     int numNeighCells = 0;
 
     int nx = blockDim.x * gridDim.x;
@@ -864,27 +618,6 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
     for (int di = -1; di <= 1; ++di)
         for (int dj = -1; dj <= 1; ++dj)
-<<<<<<< HEAD:src/cuda.cu
-            for (int dk = -1; dk <= 1; ++dk)
-                {
-                    int ii = ci + di;
-                    int jj = cj + dj;
-                    int kk = ck + dk;
-                    if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
-                        {
-                            int index = (kk*ny + jj)*nx + ii;
-
-                            //consider only cell neighbors who acltually have particles
-
-                            if (cnumPars[index] != 0)
-                                {
-                                    if (border[index]) {
-                                        neighCells[numNeighCells] = index;
-                                    }
-                                    ++numNeighCells;
-                                }
-                        }
-=======
             for (int dk = -1; dk <= 1; ++dk) {
                 int ii = ci + di;
                 int jj = cj + dj;
@@ -897,7 +630,6 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
                         neighCells[numNeighCells] = index;
                     }
                     ++numNeighCells;
->>>>>>> c_version:src/cuda_c.cu
                 }
             }
 
@@ -906,16 +638,6 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
 ////////////////////////////////////////////////////////////////////////////////
 
-<<<<<<< HEAD:src/cuda.cu
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,bool *border) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    int nz = blockDim.z * gridDim.z;
-=======
 __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2,struct kernel_consts *dev,int *border) {
 
     int ix;
@@ -933,18 +655,10 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     //printf("x: %d : %d\n",nx,blockDim.x * gridDim.x);
     //printf("y: %d : %d\n",ny,blockDim.y * gridDim.y);
     //printf("z: %d : %d\n",nz,blockDim.z * gridDim.z);
->>>>>>> c_version:src/cuda_c.cu
 
     //move common declarations on top
 
     int index = (iz*ny + iy)*nx + ix;
-<<<<<<< HEAD:src/cuda.cu
-
-    Cell &cell = cells[index];
-
-    int neighCells[27];
-
-=======
     int np;  //internal loop limit
 
     //this should be moved to shared memory
@@ -954,7 +668,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     //it is safe to move the call here, neighbours do not change between the two original calls
 
->>>>>>> c_version:src/cuda_c.cu
     //move this computation to cpu
     //const float tc_orig = hSq*hSq*hSq;
 
@@ -962,10 +675,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     const float epsilon = 1e-10f;
     const float stiffness = 30000.f;
     const float damping = 128.f;
-    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-    const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
-    const Vec3 domainMax(0.065f, 0.1f, 0.065f);
-
 
     /*
     for (i=0;i<27;i++) {
@@ -1021,15 +730,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     int np2 = cnumPars2[index];
 
     for (int j = 0; j < np2; ++j) {
-<<<<<<< HEAD:src/cuda.cu
-        int ci = (int)((cell2.p[j].x - domainMin.x) / delta.x);
-        int cj = (int)((cell2.p[j].y - domainMin.y) / delta.y);
-        int ck = (int)((cell2.p[j].z - domainMin.z) / delta.z);
-=======
         int ci = (int)((cell2.p[j].x - domainMin.x) / dev->delta.x);
         int cj = (int)((cell2.p[j].y - domainMin.y) / dev->delta.y);
         int ck = (int)((cell2.p[j].z - domainMin.z) / dev->delta.z);
->>>>>>> c_version:src/cuda_c.cu
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -1037,14 +740,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
-<<<<<<< HEAD:src/cuda.cu
-        int np_renamed;
-
-        //use macro
-=======
         int np_renamed = cnumPars[index2];
 
->>>>>>> c_version:src/cuda_c.cu
         if (border[index2]) {
             //use atomic
             atomicAdd(&cnumPars[index2],1);
@@ -1052,15 +749,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
             cnumPars[index2]++;
         }
 
-<<<<<<< HEAD:src/cuda.cu
-        //#warning what if we exceed PARS_NUM particles per cell here??
-        //from what I see is that we calculate the same frame over and over
-        //so every cell has at most PARS_NUM particles, from the initialisation
-=======
         //#warning what if we exceed CELL_PARTICLES particles per cell here??
         //from what I see is that we calculate the same frame over and over
         //so every cell has at most CELL_PARTICLES particles, from the initialisation
->>>>>>> c_version:src/cuda_c.cu
 
 
         Cell &cell_renamed = cells[index2];
@@ -1090,7 +781,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
     //void InitDensitiesAndForcesMT(int i) {
 
     //from now on we don't change the cnumPars[index]
-    int np = cnumPars[index];  //internal loop limit
+    np = cnumPars[index];  //internal loop limit
 
 
     //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
@@ -1105,13 +796,9 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] = 0.f;
-<<<<<<< HEAD:src/cuda.cu
-        cell.a[j] = externalAcceleration;
-=======
         cell.a[j].x = externalAcceleration.x;
         cell.a[j].y = externalAcceleration.y;
         cell.a[j].z = externalAcceleration.z;
->>>>>>> c_version:src/cuda_c.cu
     }
 
 
@@ -1149,11 +836,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     //    Cell &cell = cells[index];
 
-<<<<<<< HEAD:src/cuda.cu
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars,border);
-=======
     Vec3 tmp;
->>>>>>> c_version:src/cuda_c.cu
 
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
@@ -1281,14 +964,11 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         operator_mult(&acc,&disp, dev->pressureCoeff * (hmr*hmr/dist) *
                                       (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity));
 
-<<<<<<< HEAD:src/cuda.cu
-=======
                         operator_sub(&tmp,&neigh.v[iparNeigh],&cell.v[j]);
                         operator_mult(&tmp,&tmp,dev->viscosityCoeff * hmr);
                         operator_add(&acc,&acc,&tmp);
                         operator_div(&acc,&acc,cell.density[j] * neigh.density[iparNeigh]);
 
->>>>>>> c_version:src/cuda_c.cu
                         if (border[index]) {
                             //use atomics
 #warning this works because no one reads these values at the moment ??
@@ -1301,12 +981,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
                         if (border[indexNeigh]) {
                             //use atomics
-<<<<<<< HEAD:src/cuda.cu
-                            //this works because no one reads these values at the moment ??
-=======
 #warning this works because no one reads these values at the moment ??
                             //reminder: there is no atomicSub for floats, so we add the negative value
->>>>>>> c_version:src/cuda_c.cu
                             atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                             atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                             atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
@@ -1446,14 +1122,10 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 } //close big_kernel()
 
 ////////////////////////////////////////////////////////////////////////////////
-<<<<<<< HEAD:src/cuda.cu
-=======
 
 int main(int argc, char *argv[]) {
     int i;
->>>>>>> c_version:src/cuda_c.cu
 
-int main(int argc, char *argv[]) {
     int grid_x;
     int grid_y;
     int grid_z;
@@ -1462,18 +1134,8 @@ int main(int argc, char *argv[]) {
     int block_y;
     int block_z;
 
-<<<<<<< HEAD:src/cuda.cu
-    //minus 1, because indexing starts from 0 and here we declare the block size
-    // block_x should be nx / XDIVS
-    // block_y should be ny          //no partitioning here
-    // block_z should be nz / ZDIVS
-
-    if (argc < 4 || argc >= 6) {
-        std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
-=======
     if (argc < 4 || argc >= 6) {
         printf("Usage: %s <threadnum> <framenum> <.fluid input file> [.fluid output file]\n",argv[0]);
->>>>>>> c_version:src/cuda_c.cu
         exit(EXIT_FAILURE);
     }
 
@@ -1483,34 +1145,23 @@ int main(int argc, char *argv[]) {
     //Check arguments
 
     if (threadnum < 1) {
-<<<<<<< HEAD:src/cuda.cu
-        std::cerr << "<threadnum> must at least be 1" << std::endl;
-=======
         printf("<threadnum> must at least be 1\n");
->>>>>>> c_version:src/cuda_c.cu
         exit(EXIT_FAILURE);
     }
 
     if (framenum < 1) {
-<<<<<<< HEAD:src/cuda.cu
-        std::cerr << "<framenum> must at least be 1" << std::endl;
-=======
         printf("<framenum> must at least be 1\n");
->>>>>>> c_version:src/cuda_c.cu
         exit(EXIT_FAILURE);
     }
 
     //read input file, allocate memory, etc
     InitSim(argv[3], threadnum);
 
-<<<<<<< HEAD:src/cuda.cu
-=======
     //minus 1, because indexing starts from 0 and here we declare the block size
     // block_x should be nx / XDIVS
     // block_y should be ny          //no partitioning here
     // block_z should be nz / ZDIVS
 
->>>>>>> c_version:src/cuda_c.cu
     grid_x = XDIVS;
     grid_y = 1;      //no partitioning here
     grid_z = ZDIVS;
@@ -1519,13 +1170,6 @@ int main(int argc, char *argv[]) {
     block_y = ny;
     block_z = nz / ZDIVS;
 
-<<<<<<< HEAD:src/cuda.cu
-    //should check for max grid size and block size from deviceQuery //FIXME
-
-    //kernel stuff
-    dim3 grid(grid_x, grid_y, grid_z);
-    dim3 block(block_x, block_y, block_z);
-=======
     //kernel stuff
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
@@ -1535,21 +1179,11 @@ int main(int argc, char *argv[]) {
 
     //dim3 grid(1,1,1);
     //dim3 block(8,8,8);
->>>>>>> c_version:src/cuda_c.cu
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
-<<<<<<< HEAD:src/cuda.cu
-    for (int i = 0; i < framenum; ++i) {
-        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,border);
-        cudaError_t err = cudaGetLastError();
-        if( cudaSuccess != err) {
-            printf("Cuda error: %s.\n", cudaGetErrorString(err));
-            exit(EXIT_FAILURE);
-        }
-=======
     printf("grid (%d, %d, %d) block (%d, %d, %d)\n",
            grid.x,grid.y,grid.z,block.x,block.y,block.z);
 
@@ -1561,15 +1195,12 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
->>>>>>> c_version:src/cuda_c.cu
         cudaDeviceSynchronize();
     }
 
     //move data to host
     CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
     CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
-<<<<<<< HEAD:src/cuda.cu
-=======
 
     //    /*debug
     int j;
@@ -1583,7 +1214,6 @@ int main(int argc, char *argv[]) {
             }*/
     }
     //    */
->>>>>>> c_version:src/cuda_c.cu
 
     if (argc > 4) {
         SaveFile(argv[4]);
