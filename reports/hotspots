@@ -1,0 +1,36 @@
+Collection and Platform Info
+  Command Line:         /opt/fluidanimate_cuda_version/build/fluidanimate_cpu 256 128 inputs/in_100K.fluid out_100K.fluid
+  Frequency:            2.1 GHz
+  Logical CPU Count:    4
+  Operating System:     Linux
+  Computer Name:        balloon
+  Result Size:          216 KB
+#
+
+Elapsed Time:           23.105s
+  Total Thread Count:   257
+  Overhead Time:        24.530s
+  CPU Time:             75.300s
+  Paused Time:          0s
+#
+
+Top Hotspots
+Function                CPU Time
+ComputeForcesMT         39.190s
+ComputeDensitiesMT      27.480s
+RebuildGridMT           2.140s
+InitNeighCellList       1.760s
+[[vdso]]                1.530s
+[Others]                3.200s
+#
+
+CPU Usage Histogram
+Simultaneously
+Utilized Logical CPUs   Elapsed Time    Utilization
+0                       0.1262430501     Idle
+1                       0.4764642161     Poor
+2                       0.3168563167     Poor
+3                       18.7118940948    Ok
+4                       3.4737363303     Ideal
+#
+

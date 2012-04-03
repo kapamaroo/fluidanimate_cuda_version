@@ -1,0 +1,18 @@
+Collection and Platform Info
+  Command Line:         /opt/fluidanimate_cuda_version/build/fluidanimate_cpu 256 32 inputs/in_100K.fluid out_100K.fluid
+  Frequency:            2.1 GHz
+  Logical CPU Count:    4
+  User Name:  nmc
+  Operating System:     Linux
+  Computer Name:        balloon
+  Result Size:          10 MB
+
+Elapsed Time:                   5.726s
+  Hardware Event Count:         79,564,000,000
+  CPU_CLK_UNHALTED.THREAD:      4.0888e+10
+  INST_RETIRED.ANY:             3.8676e+10
+  CPI Rate:                     1.057
+  LLC Miss:                     0.095s
+  Contested Accesses:           0.001s
+  Data Sharing:                 0.016s
+  Paused Time:                  0s
