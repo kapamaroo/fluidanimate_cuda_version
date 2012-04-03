@@ -3,8 +3,8 @@
 CC="g++"
 CPPFLAGS="-g -pg -fno-omit-frame-pointer -lpthread"
 
-BINDIR="bin"
-BUILDDIR="build"
+TOOLSDIR="tools"
+BUILDDIR="bin"
 
 SRC_CODE="./src/pthreads.cpp"
 PROGNAME="fluidanimate_gprof"
@@ -20,6 +20,6 @@ $CC $CPPFLAGS $SRC_CODE -o ./$BUILDDIR/$PROGNAME
 
 ./$BUILDDIR/$PROGNAME $THREADS $FRAMES $INPUT
 
-gprof ./$BUILDDIR/$PROGNAME |./$BINDIR/gprof2dot.py |dot -Tpng -o $OUTPUT_GRAPH
+gprof ./$BUILDDIR/$PROGNAME |./$TOOLSDIR/gprof2dot.py |dot -Tpng -o $OUTPUT_GRAPH
 
 #rm ./$BUILDDIR/$PROGNAME
