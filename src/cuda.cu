@@ -705,7 +705,7 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     //    Cell &cell = cells[index];
 
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars,border);
+    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars);
 
     for (int j = 0; j < np; ++j)
         for (int inc = 0; inc < numNeighCells; ++inc) {
