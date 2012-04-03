@@ -34,7 +34,7 @@ else
 fi
 
 CPPFLAGS="-lpthread -O4"
-NVCCFLAGS="$NVCCFLAGS -arch=sm_20"
+NVCCFLAGS="$NVCCFLAGS $@"
 
 BINDIR="build"
 
