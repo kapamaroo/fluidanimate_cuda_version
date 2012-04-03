@@ -136,6 +136,7 @@ Cell *h_cells2 = 0;
 int *h_cnumPars2 = 0;
 
 // flags which cells lie on grid boundaries
+bool *h_border;
 bool *border;
 
 int nx;
@@ -277,14 +278,16 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
     assert(gi == NUM_GRIDS);
 
-    border = new bool[numCells];
+    h_border = new bool[numCells];
+    assert(h_border);
+
     for (int i = 0; i < NUM_GRIDS; ++i)
         for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
             for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
                 for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
                     {
                         int index = (iz*ny + iy)*nx + ix;
-                        border[index] = false;
+                        h_border[index] = false;
                         for (int dk = -1; dk <= 1; ++dk)
                             for (int dj = -1; dj <= 1; ++dj)
                                 for (int di = -1; di <= 1; ++di)
@@ -300,7 +303,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
                                         if ( ci < grids[i].sx || ci >= grids[i].ex ||
                                             cj < grids[i].sy || cj >= grids[i].ey ||
                                             ck < grids[i].sz || ck >= grids[i].ez )
-                                            border[index] = true;
+                                            h_border[index] = true;
                                     }
                     }
 
@@ -316,10 +319,13 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&border, numCells * sizeof(bool)) );
+
     assert(h_cells && h_cnumPars);
     assert(h_cells2 && h_cnumPars2);
     assert(cells && cnumPars);
     assert(cells2 && cnumPars2);
+    assert(border);
 
     memset(h_cnumPars2, 0, numCells*sizeof(int));
 
@@ -472,7 +478,7 @@ void SaveFile(char const *fileName) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void CleanUpSim() {
-    delete[] border;
+    delete[] h_border;
     delete[] grids;
 
     delete[] h_cells;
@@ -486,11 +492,13 @@ void CleanUpSim() {
 
     CudaSafeCall( __LINE__, cudaFree(cells2) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
+
+    CudaSafeCall( __LINE__, cudaFree(border) );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars,bool *border) {
+__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
     int nz = blockDim.z * gridDim.z;
@@ -512,9 +520,7 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
                             if (cnumPars[index] != 0)
                                 {
-                                    if (border[index]) {
-                                        neighCells[numNeighCells] = index;
-                                    }
+                                    neighCells[numNeighCells] = index;
                                     ++numNeighCells;
                                 }
                         }
@@ -1006,6 +1012,7 @@ int main(int argc, char *argv[]) {
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {
         big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2,border);
