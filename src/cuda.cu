@@ -458,6 +458,7 @@ void SaveFile(char const *fileName) {
         }
     }
 
+    printf("count: %d expected %d\n",count,numParticles);
     assert(count == numParticles);
 
     int numSkipped = origNumParticles - numParticles;
@@ -502,7 +503,11 @@ void CleanUpSim() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
+__device__ int InitNeighCellList(int *neighCells, int *cnumPars) {
+    int ci = blockIdx.x * blockDim.x + threadIdx.x;
+    int cj = blockIdx.y * blockDim.y + threadIdx.y;
+    int ck = blockIdx.z * blockDim.z + threadIdx.z;
+
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
     int nz = blockDim.z * gridDim.z;
@@ -536,17 +541,23 @@ inline __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ void ClearParticlesMT(int index) {
-    cnumPars[index] = 0;
-} //close ClearParticlesMT()
-
-////////////////////////////////////////////////////////////////////////////////
-
-inline __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+__device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
     const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
-    const int nx = blockDim.x * gridDim.x;
-    const int ny = blockDim.y * gridDim.y;
-    const int nz = blockDim.z * gridDim.z;
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    int nz = blockDim.z * gridDim.z;
+
+    ////////////////////////////////////////////////////////////////////////////////
+    //__device__ void ClearParticlesMT(int index) {
+    //
+
+    cnumPars[index] = 0;
+
+    __threadfence();
+
+    //
+    //} //close ClearParticlesMT()
+    ////////////////////////////////////////////////////////////////////////////////
 
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
@@ -561,6 +572,7 @@ inline __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *
 
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
+
         int np_renamed = cnumPars[index2];
 
         //we are all borders :)
@@ -585,7 +597,7 @@ inline __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
+__device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
     const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 
     Cell &cell = cells[index];
@@ -598,7 +610,8 @@ inline __device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void ComputeDensitiesMT(int index, int np,Cell *cells, int *cnumPars, int *neighCells, int numNeighCells) {
+__device__ void ComputeDensitiesMT(int index, int np, Cell *cells,
+                                   int *cnumPars, int *neighCells, int numNeighCells) {
     //    if (np == 0)  return;
     //
     // if np==0 we do net enter the following loop
@@ -637,7 +650,7 @@ __device__ void ComputeDensitiesMT(int index, int np,Cell *cells, int *cnumPars,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ void ComputeDensities2MT(int index, int np, Cell *cells) {
+__device__ void ComputeDensities2MT(int index, int np, Cell *cells) {
     //move this computation to cpu
     //    const float tc_orig = hSq*hSq*hSq;
 
@@ -704,7 +717,7 @@ __device__ void ComputeForcesMT(int index, int np, Cell *cells,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
+__device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
     const float parSize = 0.0002f;
     const float epsilon = 1e-10f;
     const float stiffness = 30000.f;
@@ -745,7 +758,7 @@ inline __device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
+__device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
@@ -760,23 +773,23 @@ inline __device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
-    const int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    const int iz = blockIdx.z * blockDim.z + threadIdx.z;
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    const int nx = blockDim.x * gridDim.x;
-    const int ny = blockDim.y * gridDim.y;
-    //    const int nz = blockDim.z * gridDim.z;
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //    int nz = blockDim.z * gridDim.z;
 
-    const int index = (iz*ny + iy)*nx + ix;
+    int index = (iz*ny + iy)*nx + ix;
 
     int neighCells[27];
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars);
 
-    ClearParticlesMT          (index);                                                 __threadfence();
     RebuildGridMT             (index,cells,cnumPars,cells2,cnumPars);                  __threadfence();
 
     int np = cnumPars[index];
+    int numNeighCells = InitNeighCellList(neighCells, cnumPars);                       __threadfence();
+    printf("%d has %d\n",index,np);
 
     InitDensitiesAndForcesMT  (index,np,cells2);                                       __threadfence();
     ComputeDensitiesMT        (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
@@ -838,7 +851,7 @@ int main(int argc, char *argv[]) {
     //should check for max grid size and block size from deviceQuery //FIXME
 
     //debug
-    analyse_neighbors();
+    //analyse_neighbors();
 
     //kernel stuff
     dim3 grid(grid_x, grid_y, grid_z);
@@ -850,7 +863,7 @@ int main(int argc, char *argv[]) {
     //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {
-        //big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
+        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
         cudaError_t err = cudaGetLastError();
         if( cudaSuccess != err) {
             printf("Cuda error: %s.\n", cudaGetErrorString(err));
