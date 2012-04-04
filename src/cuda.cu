@@ -148,11 +148,13 @@ int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
+/*
 struct Grid
 {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -204,7 +206,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     if (XDIVS*ZDIVS != threadnum) XDIVS*=2;
     assert(XDIVS * ZDIVS == threadnum);
 
-    grids = new struct Grid[NUM_GRIDS];
+    //grids = new struct Grid[NUM_GRIDS];
 
     //Load input particles
     std::cout << "Loading file \"" << fileName << "\"..." << std::endl;
@@ -253,6 +255,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
+    /*
     int gi = 0;
     int sx, sz, ex, ez;
     ex = 0;
@@ -278,7 +281,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
 
     assert(gi == NUM_GRIDS);
 
-    /*
     h_border = new bool[numCells];
     assert(h_border);
 
@@ -414,6 +416,9 @@ void SaveFile(char const *fileName) {
         file.write((char *)&origNumParticles,      4);
     }
 
+    //memcpy(h_cells,    h_cells2,    numCells * sizeof(struct Cell));
+    //memcpy(h_cnumPars, h_cnumPars2, numCells * sizeof(int));
+
     int count = 0;
     for (int i = 0; i < numCells; ++i) {
         Cell const &cell = h_cells[i];
@@ -481,7 +486,7 @@ void SaveFile(char const *fileName) {
 
 void CleanUpSim() {
     //delete[] h_border;
-    delete[] grids;
+    //delete[] grids;
 
     delete[] h_cells;
     delete[] h_cnumPars;
@@ -500,7 +505,7 @@ void CleanUpSim() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
+inline __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *cnumPars) {
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
     int nz = blockDim.z * gridDim.z;
@@ -533,72 +538,17 @@ __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells, int *c
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    int nz = blockDim.z * gridDim.z;
-
-    //move common declarations on top
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    Cell &cell = cells[index];
-
-    int neighCells[27];
-
-    //move this computation to cpu
-    //const float tc_orig = hSq*hSq*hSq;
-
-    const float parSize = 0.0002f;
-    const float epsilon = 1e-10f;
-    const float stiffness = 30000.f;
-    const float damping = 128.f;
-    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-    const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
-    const Vec3 domainMax(0.065f, 0.1f, 0.065f);
-
-
-
-
-    ////////////////////////////////////////////////////////////////////////////////
-    //void ClearParticlesMT(int i) {
-    ////////////////////////////////////////////////////////////////////////////////
-
-
-
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //    for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //        for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
+inline __device__ void ClearParticlesMT(int index) {
     cnumPars[index] = 0;
+} //close ClearParticlesMT()
 
-    //                }  //close nested loop;
+////////////////////////////////////////////////////////////////////////////////
 
-
-
-    __syncthreads();
-
-
-
-    //} close ClearParticlesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void RebuildGridMT(int i) {
-
-
-
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
+inline __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+    const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
+    const int nx = blockDim.x * gridDim.x;
+    const int ny = blockDim.y * gridDim.y;
+    const int nz = blockDim.z * gridDim.z;
 
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
@@ -622,7 +572,6 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         //from what I see is that we calculate the same frame over and over
         //so every cell has at most PARS_NUM particles, from the initialisation
 
-
         Cell &cell_renamed = cells[index2];
         cell_renamed.p[np_renamed].x = cell2.p[j].x;
         cell_renamed.p[np_renamed].y = cell2.p[j].y;
@@ -634,82 +583,36 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         cell_renamed.v[np_renamed].y = cell2.v[j].y;
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
     }
+} //close RebuildGridMT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
+inline __device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
+    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 
-
-    __syncthreads();
-
-
-
-
-    //} close RebuildGridMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void InitDensitiesAndForcesMT(int i) {
-
-    //from now on we don't change the cnumPars[index]
-    int np = cnumPars[index];  //internal loop limit
-
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    Cell &cell = cells[index];
-
-    //    int np = cnumPars[index];
+    Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] = 0.f;
         cell.a[j] = externalAcceleration;
     }
+} //close InitDensitiesAndForcesMT()
 
+////////////////////////////////////////////////////////////////////////////////
 
-    //                }  //close nested loops
-
-
-
-    __syncthreads();
-
-
-
-
-    //} close InitDensitiesAndForcesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void ComputeDensitiesMT(int i) {
-
-
-
-
-    //    int neighCells[27];
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    int np = cnumPars[index];
-
-    //    if (np == 0)  continue;
+__device__ void ComputeDensitiesMT(int index, int np,Cell *cells, int *cnumPars, int *neighCells, int numNeighCells) {
+    //    if (np == 0)  return;
     //
     // if np==0 we do net enter the following loop
 
-    //    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+    Cell &cell = cells[index];
 
-    //    Cell &cell = cells[index];
-
-    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars);
-
-    for (int j = 0; j < np; ++j)
+    for (int j = 0; j < np; ++j) {
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
-            for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
+            for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
                     float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
                     if (distSq < hSq) {
@@ -721,82 +624,41 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         atomicAdd(&neigh.density[iparNeigh],tc);
                     }
                 }
+            }
         }
+    }
+} //close ComputeDensitiesMT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
+inline __device__ void ComputeDensities2MT(int index, int np, Cell *cells) {
+    //move this computation to cpu
+    //    const float tc_orig = hSq*hSq*hSq;
 
-
-    __syncthreads();
-
-
-
-
-    //} close ComputeDensitiesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void ComputeDensities2MT(int i) {
-
-
-
-
-    //    const float tc = hSq*hSq*hSq;
-
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    Cell &cell = cells[index];
-
-    //    int np = cnumPars[index];
+    Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
         cell.density[j] += tc_orig;
         cell.density[j] *= densityCoeff;
     }
+} //close ComputeDensities2MT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
-
-
-    __syncthreads();
-
-
-
-
-    //} close ComputeDensities2MT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void ComputeForcesMT(int i) {
-
-
-
-
-    //    int neighCells[27];
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    int np = cnumPars[index];
-
-    //    if (np == 0)  continue;
+__device__ void ComputeForcesMT(int index, int np, Cell *cells,
+                                int *cnumPars, int *neighCells, int numNeighCells) {
+    //    if (np == 0)  return;
     //
     // if np==0 we do net enter the following loop
 
-    //    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells);
+    Cell &cell = cells[index];
 
-    //    Cell &cell = cells[index];
-
-    for (int j = 0; j < np; ++j)
+    for (int j = 0; j < np; ++j) {
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
-            for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh)
+            for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
                     Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
                     float distSq = disp.GetLengthSq();
@@ -821,38 +683,22 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
                         atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
                     }
                 }
+            }
         }
+    }
+} //close ComputeForcesMT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
+inline __device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
+    const float parSize = 0.0002f;
+    const float epsilon = 1e-10f;
+    const float stiffness = 30000.f;
+    const float damping = 128.f;
+    const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
+    const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
-
-    __syncthreads();
-
-
-
-
-    //} close ComputeForcesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void ProcessCollisionsMT(int i) {
-
-
-
-
-    //    const float parSize = 0.0002f;
-    //    const float epsilon = 1e-10f;
-    //    const float stiffness = 30000.f;
-    //    const float damping = 128.f;
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    Cell &cell = cells[index];
-
-    //    int np = cnumPars[index];
+    Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
         Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
@@ -881,32 +727,12 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         if (diff > epsilon)
             cell.a[j].z -= stiffness*diff + damping*cell.v[j].z;
     }
+} //close ProcessCollisionsMT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
-
-
-    __syncthreads();
-
-
-
-
-    //} close ProcessCollisionsMT()
-    ////////////////////////////////////////////////////////////////////////////////
-    //void AdvanceParticlesMT(int i) {
-
-
-
-
-    //    for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-    //        for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-    //            for (int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-
-    //    int index = (iz*ny + iy)*nx + ix;
-
-    //    Cell &cell = cells[index];
-
-    //    int np = cnumPars[index];
+inline __device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
+    Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
         Vec3 v_half = cell.hv[j] + cell.a[j]*timeStep;
@@ -915,21 +741,35 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
         cell.v[j] *= 0.5f;
         cell.hv[j] = v_half;
     }
+} //close AdvanceParticlesMT()
 
-    //                }  //close nested loops
+////////////////////////////////////////////////////////////////////////////////
 
+__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+    const int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const int iz = blockIdx.z * blockDim.z + threadIdx.z;
 
+    const int nx = blockDim.x * gridDim.x;
+    const int ny = blockDim.y * gridDim.y;
+    //    const int nz = blockDim.z * gridDim.z;
 
-    __syncthreads();
+    const int index = (iz*ny + iy)*nx + ix;
 
+    int neighCells[27];
+    int numNeighCells = InitNeighCellList(ix, iy, iz, neighCells, cnumPars);
 
+    ClearParticlesMT          (index);                                                 __threadfence();
+    RebuildGridMT             (index,cells,cnumPars,cells2,cnumPars);                  __threadfence();
 
+    int np = cnumPars[index];
 
-    //} close AdvanceParticlesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-
-
-
+    InitDensitiesAndForcesMT  (index,np,cells2);                                       __threadfence();
+    ComputeDensitiesMT        (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
+    ComputeDensities2MT       (index,np,cells);                                        __threadfence();
+    ComputeForcesMT           (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
+    ProcessCollisionsMT       (index,np,cells);                                        __threadfence();
+    AdvanceParticlesMT        (index,np,cells);                                        __threadfence();
 
 } //close big_kernel()
 
@@ -991,7 +831,7 @@ int main(int argc, char *argv[]) {
     //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {
-        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
+        //big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
         cudaError_t err = cudaGetLastError();
         if( cudaSuccess != err) {
             printf("Cuda error: %s.\n", cudaGetErrorString(err));
