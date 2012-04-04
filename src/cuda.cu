@@ -148,13 +148,10 @@ int ZDIVS = 1;	// number of partitions in Z
 
 #define NUM_GRIDS  ((XDIVS) * (ZDIVS))
 
-/*
-struct Grid
-{
+struct Grid {
     int sx, sy, sz;
     int ex, ey, ez;
 } *grids;
-*/
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -206,8 +203,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     if (XDIVS*ZDIVS != threadnum) XDIVS*=2;
     assert(XDIVS * ZDIVS == threadnum);
 
-    //grids = new struct Grid[NUM_GRIDS];
-
     //Load input particles
     std::cout << "Loading file \"" << fileName << "\"..." << std::endl;
     std::ifstream file(fileName, std::ios::binary);
@@ -255,7 +250,17 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
+
     /*
+    grids = new struct Grid[NUM_GRIDS];
+
     int gi = 0;
     int sx, sz, ex, ez;
     ex = 0;
@@ -384,14 +389,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
             --numParticles;
     }
 
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("hSq", &h_hSq, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("densityCoeff", &h_densityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("pressureCoeff", &h_pressureCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
-    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
-
     std::cout << "Number of particles: " << numParticles << " (" << origNumParticles-numParticles << " skipped)" << std::endl;
 }
 
@@ -512,26 +509,27 @@ inline __device__ int InitNeighCellList(int ci, int cj, int ck, int *neighCells,
 
     int numNeighCells = 0;
 
-    for (int di = -1; di <= 1; ++di)
-        for (int dj = -1; dj <= 1; ++dj)
-            for (int dk = -1; dk <= 1; ++dk)
-                {
-                    int ii = ci + di;
-                    int jj = cj + dj;
-                    int kk = ck + dk;
-                    if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
-                        {
-                            int index = (kk*ny + jj)*nx + ii;
+    for (int di = -1; di <= 1; ++di) {
+        for (int dj = -1; dj <= 1; ++dj) {
+            for (int dk = -1; dk <= 1; ++dk) {
+                int ii = ci + di;
+                int jj = cj + dj;
+                int kk = ck + dk;
+                if (ii >= 0 && ii < nx &&
+                    jj >= 0 && jj < ny &&
+                    kk >= 0 && kk < nz) {
+                    int index = (kk*ny + jj)*nx + ii;
 
-                            //consider only cell neighbors who acltually have particles
+                    //consider only cell neighbors who actually have particles
 
-                            if (cnumPars[index] != 0)
-                                {
-                                    neighCells[numNeighCells] = index;
-                                    ++numNeighCells;
-                                }
-                        }
+                    if (cnumPars[index] != 0) {
+                        neighCells[numNeighCells] = index;
+                        ++numNeighCells;
+                    }
                 }
+            }
+        }
+    }
 
     return numNeighCells;
 }
@@ -620,8 +618,15 @@ __device__ void ComputeDensitiesMT(int index, int np,Cell *cells, int *cnumPars,
                         float tc = t*t*t;
 
                         //we are all borders :)
+
+                        //also consider the fact that I am neighbor of my neighbor
+                        //so we both calculate the same tc.
+                        //I can add tc to myself twice, because of that  //FIXME
+
                         atomicAdd(&cell.density[j],tc);
                         atomicAdd(&neigh.density[iparNeigh],tc);
+
+                        //atomicAdd(&cell.density[j],2*tc);
                     }
                 }
             }
@@ -775,6 +780,8 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void analyse_neighbors();
+
 int main(int argc, char *argv[]) {
     int grid_x;
     int grid_y;
@@ -821,6 +828,9 @@ int main(int argc, char *argv[]) {
 
     //should check for max grid size and block size from deviceQuery //FIXME
 
+    //debug
+    analyse_neighbors();
+
     //kernel stuff
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
@@ -853,3 +863,91 @@ int main(int argc, char *argv[]) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//
+//                          DEBUG CODE
+//
+////////////////////////////////////////////////////////////////////////////////
+
+
+/* Simulate neighbor relations */
+void analyse_neighbors() {
+    grids = new struct Grid[NUM_GRIDS];
+
+    int gi = 0;
+    int sx, sz, ex, ez;
+    ex = 0;
+    for (int i = 0; i < XDIVS; ++i) {
+        sx = ex;
+        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
+        assert(sx < ex);
+
+        ez = 0;
+        for (int j = 0; j < ZDIVS; ++j, ++gi) {
+            sz = ez;
+            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
+            assert(sz < ez);
+
+            grids[gi].sx = sx;
+            grids[gi].ex = ex;
+            grids[gi].sy = 0;
+            grids[gi].ey = ny;
+            grids[gi].sz = sz;
+            grids[gi].ez = ez;
+        }
+    }
+
+    assert(gi == NUM_GRIDS);
+
+    int *symmetry = new int[numCells*27];
+    memset(symmetry,0,numCells*27*sizeof(int));
+    int *snum = new int[numCells];
+    memset(snum,0,numCells*sizeof(int));
+
+    for(int i = 0; i < NUM_GRIDS; ++i) {
+        for(int iz = grids[i].sz; iz < grids[i].ez; ++iz) {
+            for(int iy = grids[i].sy; iy < grids[i].ey; ++iy) {
+                for(int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
+                    int sanity = 0;
+                    int index = (iz*ny + iy)*nx + ix;
+                    for(int dk = -1; dk <= 1; ++dk) {
+                        int ck = iz + dk;
+                        if(ck < 0 || ck > (nz-1)) continue;
+                        for(int dj = -1; dj <= 1; ++dj) {
+                            int cj = iy + dj;
+                            if(cj < 0 || cj > (ny-1)) continue;
+                            for(int di = -1; di <= 1; ++di) {
+                                int ci = ix + di;
+                                if(ci < 0 || ci > (nx-1)) continue;
+
+                                if (h_cnumPars2[index] != 0) {
+                                    int sindex = (ck*ny + cj)*nx + ci;
+                                    symmetry[index*27+(snum[index]++)] = sindex;
+                                    sanity++;
+                                }
+                            }
+                        }
+                    }
+                    assert(sanity<=27);
+                }
+            }
+        }
+    }
+
+    delete[] grids;
+
+    printf("debug: neighbor status (good : bad)\n");
+    for (int i=0; i<numCells; i++) {
+        bool alone = true;
+        for (int j=0; j<27; j++) {
+            if (j>=snum[i]) break;
+            for (int k=0; k<27; k++) {
+                if (k>=snum[symmetry[27*i+j]]) break;
+                if (i==symmetry[symmetry[27*i+j]*27+k]) alone = false;
+            }
+            if (alone) printf("debug: %d : %d\n",i,symmetry[27*i+j]);
+        }
+    }
+
+    delete[] symmetry;
+    delete[] snum;
+}
