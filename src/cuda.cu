@@ -621,12 +621,13 @@ __device__ void ComputeDensitiesMT(int index, int np,Cell *cells, int *cnumPars,
 
                         //also consider the fact that I am neighbor of my neighbor
                         //so we both calculate the same tc.
-                        //I can add tc to myself twice, because of that  //FIXME
+                        //I can add tc to myself twice, because of that
+                        //and no more need for atomics!
 
-                        atomicAdd(&cell.density[j],tc);
-                        atomicAdd(&neigh.density[iparNeigh],tc);
+                        //atomicAdd(&cell.density[j],tc);
+                        //atomicAdd(&neigh.density[iparNeigh],tc);
 
-                        //atomicAdd(&cell.density[j],2*tc);
+                        cell.density[j] += 2*tc;  //FIXME ??
                     }
                 }
             }
@@ -679,13 +680,21 @@ __device__ void ComputeForcesMT(int index, int np, Cell *cells,
                         acc /= cell.density[j] * neigh.density[iparNeigh];
 
                         //we are all borders :)
-                        atomicAdd(&cell.a[j].x,acc.x);
-                        atomicAdd(&cell.a[j].y,acc.y);
-                        atomicAdd(&cell.a[j].z,acc.z);
+                        //also consider the fact that I am neighbor of my neighbor
+                        //so when I calculate acc, he calculates -acc
+                        //I can add acc to myself twice, because of that
 
-                        atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
-                        atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
-                        atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+                        //atomicAdd(&cell.a[j].x,acc.x);
+                        //atomicAdd(&cell.a[j].y,acc.y);
+                        //atomicAdd(&cell.a[j].z,acc.z);
+
+                        //atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
+                        //atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
+                        //atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+
+                        cell.a[j].x += 2*acc.x;  //FIXME ??
+                        cell.a[j].y += 2*acc.y;  //FIXME ??
+                        cell.a[j].z += 2*acc.z;  //FIXME ??
                     }
                 }
             }
