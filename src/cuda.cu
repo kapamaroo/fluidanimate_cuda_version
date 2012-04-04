@@ -458,7 +458,6 @@ void SaveFile(char const *fileName) {
         }
     }
 
-    printf("count: %d expected %d\n",count,numParticles);
     assert(count == numParticles);
 
     int numSkipped = origNumParticles - numParticles;
@@ -553,11 +552,11 @@ __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2,
 
     cnumPars[index] = 0;
 
-    __threadfence();
-
     //
     //} //close ClearParticlesMT()
     ////////////////////////////////////////////////////////////////////////////////
+
+    __threadfence();
 
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
@@ -592,6 +591,7 @@ __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2,
         cell_renamed.v[np_renamed].x = cell2.v[j].x;
         cell_renamed.v[np_renamed].y = cell2.v[j].y;
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
+        //__threadfence();
     }
 } //close RebuildGridMT()
 
@@ -852,6 +852,8 @@ int main(int argc, char *argv[]) {
     //debug
     //analyse_neighbors();
 
+    printf("grid (%d,% d, %d), block (%d, %d, %d)\n",grid_x,grid_y,grid_z,block_x,block_y,block_z);
+
     //kernel stuff
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
@@ -859,6 +861,7 @@ int main(int argc, char *argv[]) {
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
+
     //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {

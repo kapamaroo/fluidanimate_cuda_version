@@ -56,7 +56,7 @@ int main(int argc, char *argv[])
 		if(pos && fabsf(v1-v2) > tol)
 		{
 			cout << i << ": Values differ (" << v1 << " vs. " << v2 << ")." << endl;
-			return 0;
+			//return 0;
 		}
 	}
 
