@@ -21,6 +21,14 @@ void CudaSafeCall(int lineno, cudaError_t err) {
     }
 }
 
+void CUDA_CHECK_ERROR() {
+    cudaError_t err = cudaGetLastError();
+    if( cudaSuccess != err) {
+        printf("Cuda error: %s.\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+}
+
 static inline int isLittleEndian() {
     union {
         uint16_t word;
@@ -540,23 +548,35 @@ __device__ int InitNeighCellList(int *neighCells, int *cnumPars) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+__global__ void ClearParticlesMT(int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    cnumPars[index] = 0;
+
+} //close ClearParticlesMT()
+
+////////////////////////////////////////////////////////////////////////////////
+
+__global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
     const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
+
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
     int nz = blockDim.z * gridDim.z;
 
-    ////////////////////////////////////////////////////////////////////////////////
-    //__device__ void ClearParticlesMT(int index) {
-    //
-
-    cnumPars[index] = 0;
-
-    //
-    //} //close ClearParticlesMT()
-    ////////////////////////////////////////////////////////////////////////////////
-
-    __threadfence();
+    int index = (iz*ny + iy)*nx + ix;
 
     Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
@@ -591,13 +611,24 @@ __device__ void RebuildGridMT(int index,Cell *cells, int *cnumPars,Cell *cells2,
         cell_renamed.v[np_renamed].x = cell2.v[j].x;
         cell_renamed.v[np_renamed].y = cell2.v[j].y;
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
-        //__threadfence();
     }
 } //close RebuildGridMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
+__global__ void InitDensitiesAndForcesMT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 
     Cell &cell = cells[index];
@@ -610,11 +641,26 @@ __device__ void InitDensitiesAndForcesMT(int index,int np,Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void ComputeDensitiesMT(int index, int np, Cell *cells,
-                                   int *cnumPars, int *neighCells, int numNeighCells) {
+__global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     //    if (np == 0)  return;
     //
     // if np==0 we do net enter the following loop
+
+    int neighCells[27];
+
+    int numNeighCells = InitNeighCellList(neighCells, cnumPars);
 
     Cell &cell = cells[index];
 
@@ -637,10 +683,10 @@ __device__ void ComputeDensitiesMT(int index, int np, Cell *cells,
                         //I can add tc to myself twice, because of that
                         //and no more need for atomics!
 
-                        //atomicAdd(&cell.density[j],tc);
-                        //atomicAdd(&neigh.density[iparNeigh],tc);
+                        atomicAdd(&cell.density[j],tc);
+                        atomicAdd(&neigh.density[iparNeigh],tc);
 
-                        cell.density[j] += 2*tc;  //FIXME ??
+                        //cell.density[j] += 2*tc;  //FIXME ??
                     }
                 }
             }
@@ -650,7 +696,19 @@ __device__ void ComputeDensitiesMT(int index, int np, Cell *cells,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void ComputeDensities2MT(int index, int np, Cell *cells) {
+__global__ void ComputeDensities2MT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     //move this computation to cpu
     //    const float tc_orig = hSq*hSq*hSq;
 
@@ -664,11 +722,26 @@ __device__ void ComputeDensities2MT(int index, int np, Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void ComputeForcesMT(int index, int np, Cell *cells,
-                                int *cnumPars, int *neighCells, int numNeighCells) {
+__global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     //    if (np == 0)  return;
     //
     // if np==0 we do net enter the following loop
+
+    int neighCells[27];
+
+    int numNeighCells = InitNeighCellList(neighCells, cnumPars);
 
     Cell &cell = cells[index];
 
@@ -697,17 +770,17 @@ __device__ void ComputeForcesMT(int index, int np, Cell *cells,
                         //so when I calculate acc, he calculates -acc
                         //I can add acc to myself twice, because of that
 
-                        //atomicAdd(&cell.a[j].x,acc.x);
-                        //atomicAdd(&cell.a[j].y,acc.y);
-                        //atomicAdd(&cell.a[j].z,acc.z);
+                        atomicAdd(&cell.a[j].x,acc.x);
+                        atomicAdd(&cell.a[j].y,acc.y);
+                        atomicAdd(&cell.a[j].z,acc.z);
 
-                        //atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
-                        //atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
-                        //atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+                        atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
+                        atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
+                        atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
 
-                        cell.a[j].x += 2*acc.x;  //FIXME ??
-                        cell.a[j].y += 2*acc.y;  //FIXME ??
-                        cell.a[j].z += 2*acc.z;  //FIXME ??
+                        //cell.a[j].x += 2*acc.x;  //FIXME ??
+                        //cell.a[j].y += 2*acc.y;  //FIXME ??
+                        //cell.a[j].z += 2*acc.z;  //FIXME ??
                     }
                 }
             }
@@ -717,7 +790,19 @@ __device__ void ComputeForcesMT(int index, int np, Cell *cells,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
+__global__ void ProcessCollisionsMT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     const float parSize = 0.0002f;
     const float epsilon = 1e-10f;
     const float stiffness = 30000.f;
@@ -758,7 +843,19 @@ __device__ void ProcessCollisionsMT(int index, int np,Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
+__global__ void AdvanceParticlesMT(Cell *cells, int *cnumPars) {
+    int ix = blockIdx.x * blockDim.x + threadIdx.x;
+    int iy = blockIdx.y * blockDim.y + threadIdx.y;
+    int iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    //int nz = blockDim.z * gridDim.z;
+
+    int index = (iz*ny + iy)*nx + ix;
+
+    int np = cnumPars[index];
+
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
@@ -772,38 +869,7 @@ __device__ void AdvanceParticlesMT(int index, int np,Cell *cells) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    int nz = blockDim.z * gridDim.z;
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    int neighCells[27];
-
-    RebuildGridMT             (index,cells,cnumPars,cells2,cnumPars2);                 __threadfence();
-
-    int np = cnumPars[index];
-    int numNeighCells = InitNeighCellList(neighCells, cnumPars);                       __threadfence();
-
-    InitDensitiesAndForcesMT  (index,np,cells2);                                       __threadfence();
-    ComputeDensitiesMT        (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
-    ComputeDensities2MT       (index,np,cells);                                        __threadfence();
-    ComputeForcesMT           (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
-    ProcessCollisionsMT       (index,np,cells);                                        __threadfence();
-    AdvanceParticlesMT        (index,np,cells);                                        __threadfence();
-
-} //close big_kernel()
-
-////////////////////////////////////////////////////////////////////////////////
-
-void analyse_neighbors();
-
-int main(int argc, char *argv[]) {
+void call_kernels() {
     int grid_x;
     int grid_y;
     int grid_z;
@@ -817,6 +883,35 @@ int main(int argc, char *argv[]) {
     // block_y should be ny          //no partitioning here
     // block_z should be nz / ZDIVS
 
+    grid_x = XDIVS;
+    grid_y = 1;      //no partitioning here
+    grid_z = ZDIVS;
+
+    block_x = nx / XDIVS;
+    block_y = ny;
+    block_z = nz / ZDIVS;
+
+    //printf("grid (%d,% d, %d), block (%d, %d, %d)\n",grid_x,grid_y,grid_z,block_x,block_y,block_z);
+
+    //kernel stuff
+    dim3 grid(grid_x, grid_y, grid_z);
+    dim3 block(block_x, block_y, block_z);
+
+    ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR();
+    RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR();
+    InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void analyse_neighbors();
+
+int main(int argc, char *argv[]) {
     if (argc < 4 || argc >= 6) {
         std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
         exit(EXIT_FAILURE);
@@ -839,24 +934,7 @@ int main(int argc, char *argv[]) {
 
     InitSim(argv[3], threadnum);
 
-    grid_x = XDIVS;
-    grid_y = 1;      //no partitioning here
-    grid_z = ZDIVS;
-
-    block_x = nx / XDIVS;
-    block_y = ny;
-    block_z = nz / ZDIVS;
-
-    //should check for max grid size and block size from deviceQuery //FIXME
-
-    //debug
-    //analyse_neighbors();
-
-    printf("grid (%d,% d, %d), block (%d, %d, %d)\n",grid_x,grid_y,grid_z,block_x,block_y,block_z);
-
-    //kernel stuff
-    dim3 grid(grid_x, grid_y, grid_z);
-    dim3 block(block_x, block_y, block_z);
+    //analyse_neighbors();  //debug
 
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
@@ -865,13 +943,7 @@ int main(int argc, char *argv[]) {
     //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {
-        big_kernel<<<grid,block>>>(cells,cnumPars,cells2,cnumPars2);
-        cudaError_t err = cudaGetLastError();
-        if( cudaSuccess != err) {
-            printf("Cuda error: %s.\n", cudaGetErrorString(err));
-            exit(EXIT_FAILURE);
-        }
-        cudaDeviceSynchronize();
+        call_kernels();
     }
 
     //move data to host
