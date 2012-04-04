@@ -779,17 +779,16 @@ __global__ void big_kernel(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPar
 
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
-    //    int nz = blockDim.z * gridDim.z;
+    int nz = blockDim.z * gridDim.z;
 
     int index = (iz*ny + iy)*nx + ix;
 
     int neighCells[27];
 
-    RebuildGridMT             (index,cells,cnumPars,cells2,cnumPars);                  __threadfence();
+    RebuildGridMT             (index,cells,cnumPars,cells2,cnumPars2);                 __threadfence();
 
     int np = cnumPars[index];
     int numNeighCells = InitNeighCellList(neighCells, cnumPars);                       __threadfence();
-    printf("%d has %d\n",index,np);
 
     InitDensitiesAndForcesMT  (index,np,cells2);                                       __threadfence();
     ComputeDensitiesMT        (index,np,cells,cnumPars,neighCells,numNeighCells);      __threadfence();
