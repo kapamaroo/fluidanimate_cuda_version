@@ -682,11 +682,15 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
                         //so we both calculate the same tc.
                         //I can add tc to myself twice, because of that
                         //and no more need for atomics!
+                        //but I must consider the other particles in my cell
+
+                        //if (tc!=0) printf("%d[%d] to %d[%d]: my tc is %e\n",index,j,indexNeigh,iparNeigh,tc);
 
                         atomicAdd(&cell.density[j],tc);
                         atomicAdd(&neigh.density[iparNeigh],tc);
 
                         //cell.density[j] += 2*tc;  //FIXME ??
+                        //atomicAdd(&cell.density[j],2*tc);
                     }
                 }
             }
@@ -769,6 +773,7 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                         //also consider the fact that I am neighbor of my neighbor
                         //so when I calculate acc, he calculates -acc
                         //I can add acc to myself twice, because of that
+                        //but I must consider the other particles in my cell
 
                         atomicAdd(&cell.a[j].x,acc.x);
                         atomicAdd(&cell.a[j].y,acc.y);
@@ -777,6 +782,10 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                         atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                         atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                         atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
+
+                        //atomicAdd(&cell.a[j].x,2*acc.x);
+                        //atomicAdd(&cell.a[j].y,2*acc.y);
+                        //atomicAdd(&cell.a[j].z,2*acc.z);
 
                         //cell.a[j].x += 2*acc.x;  //FIXME ??
                         //cell.a[j].y += 2*acc.y;  //FIXME ??
