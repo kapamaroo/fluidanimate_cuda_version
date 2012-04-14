@@ -594,10 +594,7 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
 
-        int np_renamed = cnumPars[index2];
-
-        //we are all borders :)
-        atomicAdd(&cnumPars[index2],1);
+        int np_renamed = atomicAdd(&cnumPars[index2],1);
 
         //#warning what if we exceed PARS_NUM particles per cell here??
         //from what I see is that we calculate the same frame over and over
