@@ -21,10 +21,10 @@ void CudaSafeCall(int lineno, cudaError_t err) {
     }
 }
 
-void CUDA_CHECK_ERROR() {
+void CUDA_CHECK_ERROR(const char *msg) {
     cudaError_t err = cudaGetLastError();
     if( cudaSuccess != err) {
-        printf("Cuda error: %s.\n", cudaGetErrorString(err));
+        printf("Cuda error: %s: %s.\n", msg, cudaGetErrorString(err));
         exit(EXIT_FAILURE);
     }
 }
@@ -255,7 +255,9 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     h_delta.y = range.y / ny;
     h_delta.z = range.z / nz;
 
-    assert(h_delta.x >= h_h && h_delta.y >= h_h && h_delta.z >= h_h);
+    assert(h_delta.x >= h_h);
+    assert(h_delta.y >= h_h);
+    assert(h_delta.z >= h_h);
     assert(nx >= XDIVS && nz >= ZDIVS);
 
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("h", &h_h, sizeof(float), 0, cudaMemcpyHostToDevice) );
@@ -668,9 +670,15 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
+            //if (&cell == &neigh) printf("%d: i found myself\n",index);
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
+
+                //when i check for (a < b) my neighbor checks for (b > a)
+                //therefore we enter the if statement when (a != b)
+
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
+                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
                     float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
                     if (distSq < hSq) {
                         float t = hSq - distSq;
@@ -684,13 +692,10 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
                         //and no more need for atomics!
                         //but I must consider the other particles in my cell
 
-                        //if (tc!=0) printf("%d[%d] to %d[%d]: my tc is %e\n",index,j,indexNeigh,iparNeigh,tc);
-
                         atomicAdd(&cell.density[j],tc);
                         atomicAdd(&neigh.density[iparNeigh],tc);
 
-                        //cell.density[j] += 2*tc;  //FIXME ??
-                        //atomicAdd(&cell.density[j],2*tc);
+                        //cell.density[j] += tc;
                     }
                 }
             }
@@ -755,7 +760,12 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
+
+                //when i check for (a < b) my neighbor checks for (b > a)
+                //therefore we enter the if statement when (a != b)
+
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
+                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
                     Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
                     float distSq = disp.GetLengthSq();
                     if (distSq < hSq) {
@@ -783,13 +793,9 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                         atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                         atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
 
-                        //atomicAdd(&cell.a[j].x,2*acc.x);
-                        //atomicAdd(&cell.a[j].y,2*acc.y);
-                        //atomicAdd(&cell.a[j].z,2*acc.z);
-
-                        //cell.a[j].x += 2*acc.x;  //FIXME ??
-                        //cell.a[j].y += 2*acc.y;  //FIXME ??
-                        //cell.a[j].z += 2*acc.z;  //FIXME ??
+                        //cell.a[j].x += acc.x;
+                        //cell.a[j].y += acc.y;
+                        //cell.a[j].z += acc.z;
                     }
                 }
             }
@@ -906,14 +912,14 @@ void call_kernels() {
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
-    ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR();
-    RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR();
-    InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
-    ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
-    ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
-    ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
-    ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
-    AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR();
+    ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR("1");
+    RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR("2");
+    InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("3");
+    ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("4");
+    ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("5");
+    ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("6");
+    ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
+    AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("8");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
