@@ -22,13 +22,13 @@ echo "#"
 echo "# CPU Test"
 echo "#"
 
-./$BUILDDIR/$CPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
+#time ./$BUILDDIR/$CPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
 
 echo "#"
 echo "# GPU Test"
 echo "#"
 
-./$BUILDDIR/$GPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$GPU_OUTPUT
+time ./$BUILDDIR/$GPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$GPU_OUTPUT
 
 echo "#"
 echo "# Test Finished."
