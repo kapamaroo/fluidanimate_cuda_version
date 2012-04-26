@@ -669,6 +669,7 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
+        float local_tc = 0;
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
@@ -694,14 +695,16 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
                         //and no more need for atomics!
                         //but I must consider the other particles in my cell
 
-                        atomicAdd(&cell.density[j],tc);
                         atomicAdd(&neigh.density[iparNeigh],tc);
+
+                        local_tc += tc;
 
                         //cell.density[j] += tc;
                     }
                 }
             }
         }
+        atomicAdd(&cell.density[j],local_tc);
     }
 } //close ComputeDensitiesMT()
 
@@ -757,6 +760,7 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
+        Vec3 local_acc(0,0,0);
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
@@ -787,9 +791,7 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                         //I can add acc to myself twice, because of that
                         //but I must consider the other particles in my cell
 
-                        atomicAdd(&cell.a[j].x,acc.x);
-                        atomicAdd(&cell.a[j].y,acc.y);
-                        atomicAdd(&cell.a[j].z,acc.z);
+                        local_acc += acc;
 
                         atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                         atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
@@ -802,6 +804,10 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                 }
             }
         }
+        atomicAdd(&cell.a[j].x,local_acc.x);
+        atomicAdd(&cell.a[j].y,local_acc.y);
+        atomicAdd(&cell.a[j].z,local_acc.z);
+
     }
 } //close ComputeForcesMT()
 
