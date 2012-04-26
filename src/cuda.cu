@@ -610,6 +610,11 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
         cell_renamed.v[np_renamed].x = cell2.v[j].x;
         cell_renamed.v[np_renamed].y = cell2.v[j].y;
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
+        const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
+
+        //cell_renamed.density[j] = 0.f;
+        cell_renamed.density[j] = tc_orig * densityCoeff;
+        cell_renamed.a[j] = externalAcceleration;
     }
 } //close RebuildGridMT()
 
@@ -679,7 +684,7 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
                     float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
                     if (distSq < hSq) {
                         float t = hSq - distSq;
-                        float tc = t*t*t;
+                        float tc = t*t*t*densityCoeff;
 
                         //we are all borders :)
 
@@ -721,8 +726,8 @@ __global__ void ComputeDensities2MT(Cell *cells, int *cnumPars) {
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
-        cell.density[j] += tc_orig;
-        cell.density[j] *= densityCoeff;
+        //cell.density[j] += tc_orig;
+        //cell.density[j] *= densityCoeff;
     }
 } //close ComputeDensities2MT()
 
@@ -911,9 +916,9 @@ void call_kernels() {
 
     ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR("1");
     RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR("2");
-    InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("3");
+    //InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("3");
     ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("4");
-    ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("5");
+    //ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("5");
     ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("6");
     ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
     AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("8");
