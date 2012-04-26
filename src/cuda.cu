@@ -90,18 +90,35 @@ public:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// there is a current limitation of PARS_NUM particles per cell
-// (this structure use to be a simple linked-list of particles but, due to
-// improved cache locality, we get a huge performance increase by copying
-// particles instead of referencing them)
-struct Cell
-{
-    Vec3 p[PARS_NUM];
-    Vec3 hv[PARS_NUM];
-    Vec3 v[PARS_NUM];
-    Vec3 a[PARS_NUM];
-    float density[PARS_NUM];
-};
+//host memory
+Vec3 *h_p;//[PARS_NUM];
+Vec3 *h_hv;//[PARS_NUM];
+Vec3 *h_v;//[PARS_NUM];
+Vec3 *h_a;//[PARS_NUM];
+float *h_density;//[PARS_NUM];
+int *h_cnumPars = 0;
+
+Vec3 *h_p2;//[PARS_NUM];
+Vec3 *h_hv2;//[PARS_NUM];
+Vec3 *h_v2;//[PARS_NUM];
+Vec3 *h_a2;//[PARS_NUM];
+float *h_density2;//[PARS_NUM];
+int *h_cnumPars2 = 0;
+
+//device memory
+Vec3 *p;//[PARS_NUM];
+Vec3 *hv;//[PARS_NUM];
+Vec3 *v;//[PARS_NUM];
+Vec3 *a;//[PARS_NUM];
+float *density;//[PARS_NUM];
+int *cnumPars = 0;
+
+Vec3 *p2;//[PARS_NUM];
+Vec3 *hv2;//[PARS_NUM];
+Vec3 *v2;//[PARS_NUM];
+Vec3 *a2;//[PARS_NUM];
+float *density2;//[PARS_NUM];
+int *cnumPars2 = 0;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -128,24 +145,6 @@ __device__ Vec3 delta;
 int origNumParticles = 0;
 int numParticles = 0;
 int numCells = 0;
-
-//device memory
-Cell *cells = 0;
-int *cnumPars = 0;
-
-Cell *cells2 = 0;
-int *cnumPars2 = 0;
-
-//host memory
-Cell *h_cells = 0;
-int *h_cnumPars = 0;
-
-Cell *h_cells2 = 0;
-int *h_cnumPars2 = 0;
-
-// flags which cells lie on grid boundaries
-//bool *h_border;
-//bool *border;
 
 int nx;
 int ny;
@@ -268,83 +267,38 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
 
-    /*
-    grids = new struct Grid[NUM_GRIDS];
-
-    int gi = 0;
-    int sx, sz, ex, ez;
-    ex = 0;
-    for (int i = 0; i < XDIVS; ++i) {
-        sx = ex;
-        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
-        assert(sx < ex);
-
-        ez = 0;
-        for (int j = 0; j < ZDIVS; ++j, ++gi) {
-            sz = ez;
-            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
-            assert(sz < ez);
-
-            grids[gi].sx = sx;
-            grids[gi].ex = ex;
-            grids[gi].sy = 0;
-            grids[gi].ey = ny;
-            grids[gi].sz = sz;
-            grids[gi].ez = ez;
-        }
-    }
-
-    assert(gi == NUM_GRIDS);
-
-    h_border = new bool[numCells];
-    assert(h_border);
-
-    for (int i = 0; i < NUM_GRIDS; ++i)
-        for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-            for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-                for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
-                    {
-                        int index = (iz*ny + iy)*nx + ix;
-                        h_border[index] = false;
-                        for (int dk = -1; dk <= 1; ++dk)
-                            for (int dj = -1; dj <= 1; ++dj)
-                                for (int di = -1; di <= 1; ++di)
-                                    {
-                                        int ci = ix + di;
-                                        int cj = iy + dj;
-                                        int ck = iz + dk;
-
-                                        if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
-                                        if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
-                                        if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
-
-                                        if ( ci < grids[i].sx || ci >= grids[i].ex ||
-                                            cj < grids[i].sy || cj >= grids[i].ey ||
-                                            ck < grids[i].sz || ck >= grids[i].ez )
-                                            h_border[index] = true;
-                                    }
-                    }
-    */
-
-    h_cells = new Cell[numCells];
+    h_p = new Vec3[numCells*PARS_NUM];
+    h_hv = new Vec3[numCells*PARS_NUM];
+    h_v = new Vec3[numCells*PARS_NUM];
+    h_a = new Vec3[numCells*PARS_NUM];
+    h_density = new float[numCells*PARS_NUM];
     h_cnumPars = new int[numCells];
 
-    h_cells2 = new Cell[numCells];
+    h_p2 = new Vec3[numCells*PARS_NUM];
+    h_hv2 = new Vec3[numCells*PARS_NUM];
+    h_v2 = new Vec3[numCells*PARS_NUM];
+    h_a2 = new Vec3[numCells*PARS_NUM];
+    h_density2 = new float[numCells*PARS_NUM];
     h_cnumPars2 = new int[numCells];
 
-    CudaSafeCall( __LINE__, cudaMalloc((void**)&cells, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&p, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&hv, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&v, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&a, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&density, numCells*PARS_NUM * sizeof(float)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars, numCells * sizeof(int)) );
 
-    CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&p2, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&hv2, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&v2, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&a2, numCells*PARS_NUM * sizeof(Vec3)) );
+    CudaSafeCall( __LINE__, cudaMalloc((void**)&density2, numCells*PARS_NUM * sizeof(float)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-    //CudaSafeCall( __LINE__, cudaMalloc((void**)&border, numCells * sizeof(bool)) );
-
-    assert(h_cells && h_cnumPars);
-    assert(h_cells2 && h_cnumPars2);
-    assert(cells && cnumPars);
-    assert(cells2 && cnumPars2);
-    //assert(border);
+    assert(h_p    &&   h_hv    &&   h_v    &&   h_a    &&   h_density    &&   h_cnumPars );
+    assert(h_p2   &&   h_hv2   &&   h_v2   &&   h_a2   &&   h_density2   &&   h_cnumPars2);
+    assert(p      &&   hv      &&   v      &&   a      &&   density      &&   cnumPars   );
+    assert(p2     &&   hv2     &&   v2     &&   a2     &&   density2     &&   cnumPars2  );
 
     memset(h_cnumPars2, 0, numCells*sizeof(int));
 
@@ -380,19 +334,20 @@ void InitSim(char const *fileName, unsigned int threadnum) {
         if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
 
         int index = (ck*ny + cj)*nx + ci;
-        Cell &cell = h_cells2[index];
-
         int np = h_cnumPars2[index];
+
+        int t = index*PARS_NUM + np;
+
         if (np < PARS_NUM) {
-            cell.p[np].x = px;
-            cell.p[np].y = py;
-            cell.p[np].z = pz;
-            cell.hv[np].x = hvx;
-            cell.hv[np].y = hvy;
-            cell.hv[np].z = hvz;
-            cell.v[np].x = vx;
-            cell.v[np].y = vy;
-            cell.v[np].z = vz;
+            h_p2[t].x = px;
+            h_p2[t].y = py;
+            h_p2[t].z = pz;
+            h_hv2[t].x = hvx;
+            h_hv2[t].y = hvy;
+            h_hv2[t].z = hvz;
+            h_v2[t].x = vx;
+            h_v2[t].y = vy;
+            h_v2[t].z = vz;
             ++h_cnumPars2[index];
         }
         else
@@ -423,26 +378,22 @@ void SaveFile(char const *fileName) {
         file.write((char *)&origNumParticles,      4);
     }
 
-    //memcpy(h_cells,    h_cells2,    numCells * sizeof(struct Cell));
-    //memcpy(h_cnumPars, h_cnumPars2, numCells * sizeof(int));
-
     int count = 0;
     for (int i = 0; i < numCells; ++i) {
-        Cell const &cell = h_cells[i];
         int np = h_cnumPars[i];
         for (int j = 0; j < np; ++j) {
             if (!isLittleEndian()) {
                 float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
 
-                px  = bswap_float(cell.p[j].x);
-                py  = bswap_float(cell.p[j].y);
-                pz  = bswap_float(cell.p[j].z);
-                hvx = bswap_float(cell.hv[j].x);
-                hvy = bswap_float(cell.hv[j].y);
-                hvz = bswap_float(cell.hv[j].z);
-                vx  = bswap_float(cell.v[j].x);
-                vy  = bswap_float(cell.v[j].y);
-                vz  = bswap_float(cell.v[j].z);
+                px  = bswap_float(h_p[i*PARS_NUM + j].x);
+                py  = bswap_float(h_p[i*PARS_NUM + j].y);
+                pz  = bswap_float(h_p[i*PARS_NUM + j].z);
+                hvx = bswap_float(h_hv[i*PARS_NUM + j].x);
+                hvy = bswap_float(h_hv[i*PARS_NUM + j].y);
+                hvz = bswap_float(h_hv[i*PARS_NUM + j].z);
+                vx  = bswap_float(h_v[i*PARS_NUM + j].x);
+                vy  = bswap_float(h_v[i*PARS_NUM + j].y);
+                vz  = bswap_float(h_v[i*PARS_NUM + j].z);
 
                 file.write((char *)&px,  4);
                 file.write((char *)&py,  4);
@@ -454,15 +405,15 @@ void SaveFile(char const *fileName) {
                 file.write((char *)&vy,  4);
                 file.write((char *)&vz,  4);
             } else {
-                file.write((char *)&cell.p[j].x,  4);
-                file.write((char *)&cell.p[j].y,  4);
-                file.write((char *)&cell.p[j].z,  4);
-                file.write((char *)&cell.hv[j].x, 4);
-                file.write((char *)&cell.hv[j].y, 4);
-                file.write((char *)&cell.hv[j].z, 4);
-                file.write((char *)&cell.v[j].x,  4);
-                file.write((char *)&cell.v[j].y,  4);
-                file.write((char *)&cell.v[j].z,  4);
+                file.write((char *)&h_p[i*PARS_NUM + j].x,  4);
+                file.write((char *)&h_p[i*PARS_NUM + j].y,  4);
+                file.write((char *)&h_p[i*PARS_NUM + j].z,  4);
+                file.write((char *)&h_hv[i*PARS_NUM + j].x, 4);
+                file.write((char *)&h_hv[i*PARS_NUM + j].y, 4);
+                file.write((char *)&h_hv[i*PARS_NUM + j].z, 4);
+                file.write((char *)&h_v[i*PARS_NUM + j].x,  4);
+                file.write((char *)&h_v[i*PARS_NUM + j].y,  4);
+                file.write((char *)&h_v[i*PARS_NUM + j].z,  4);
             }
             ++count;
         }
@@ -495,19 +446,33 @@ void CleanUpSim() {
     //delete[] h_border;
     //delete[] grids;
 
-    delete[] h_cells;
+    delete[] h_p;
+    delete[] h_hv;
+    delete[] h_v;
+    delete[] h_a;
+    delete[] h_density;
     delete[] h_cnumPars;
 
-    delete[] h_cells2;
+    delete[] h_p2;
+    delete[] h_hv2;
+    delete[] h_v2;
+    delete[] h_a2;
+    delete[] h_density2;
     delete[] h_cnumPars2;
 
-    CudaSafeCall( __LINE__, cudaFree(cells) );
+    CudaSafeCall( __LINE__, cudaFree(p) );
+    CudaSafeCall( __LINE__, cudaFree(hv) );
+    CudaSafeCall( __LINE__, cudaFree(v) );
+    CudaSafeCall( __LINE__, cudaFree(a) );
+    CudaSafeCall( __LINE__, cudaFree(density) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars) );
 
-    CudaSafeCall( __LINE__, cudaFree(cells2) );
+    CudaSafeCall( __LINE__, cudaFree(p2) );
+    CudaSafeCall( __LINE__, cudaFree(hv2) );
+    CudaSafeCall( __LINE__, cudaFree(v2) );
+    CudaSafeCall( __LINE__, cudaFree(a2) );
+    CudaSafeCall( __LINE__, cudaFree(density2) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
-
-    //CudaSafeCall( __LINE__, cudaFree(border) );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -566,8 +531,8 @@ __global__ void ClearParticlesMT(int *cnumPars) {
 } //close ClearParticlesMT()
 
 ////////////////////////////////////////////////////////////////////////////////
-
-__global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnumPars2) {
+__global__ void RebuildGridMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *density,  int *cnumPars,
+                              Vec3 *p2, Vec3 *hv2, Vec3 *v2, Vec3 *a2, float *density2, int *cnumPars2) {
     const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
 
     int ix = blockIdx.x * blockDim.x + threadIdx.x;
@@ -580,12 +545,12 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
 
     int index = (iz*ny + iy)*nx + ix;
 
-    Cell const &cell2 = cells2[index];
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int ci = (int)((cell2.p[j].x - domainMin.x) / delta.x);
-        int cj = (int)((cell2.p[j].y - domainMin.y) / delta.y);
-        int ck = (int)((cell2.p[j].z - domainMin.z) / delta.z);
+        int t = index*PARS_NUM + j;
+        int ci = (int)((p[t].x - domainMin.x) / delta.x);
+        int cj = (int)((p[t].y - domainMin.y) / delta.y);
+        int ck = (int)((p[t].z - domainMin.z) / delta.z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -594,33 +559,34 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
 
-        int np_renamed = atomicAdd(&cnumPars[index2],1);
+        assert(index==index2);
+
+        int offset = atomicAdd(&cnumPars[index2],1);
 
         //#warning what if we exceed PARS_NUM particles per cell here??
         //from what I see is that we calculate the same frame over and over
         //so every cell has at most PARS_NUM particles, from the initialisation
 
-        Cell &cell_renamed = cells[index2];
-        cell_renamed.p[np_renamed].x = cell2.p[j].x;
-        cell_renamed.p[np_renamed].y = cell2.p[j].y;
-        cell_renamed.p[np_renamed].z = cell2.p[j].z;
-        cell_renamed.hv[np_renamed].x = cell2.hv[j].x;
-        cell_renamed.hv[np_renamed].y = cell2.hv[j].y;
-        cell_renamed.hv[np_renamed].z = cell2.hv[j].z;
-        cell_renamed.v[np_renamed].x = cell2.v[j].x;
-        cell_renamed.v[np_renamed].y = cell2.v[j].y;
-        cell_renamed.v[np_renamed].z = cell2.v[j].z;
+        int l = index2*PARS_NUM + offset;
+        p[l].x = p2[t].x;
+        p[l].y = p2[t].y;
+        p[l].z = p2[t].z;
+        hv[l].x = hv2[t].x;
+        hv[l].y = hv2[t].y;
+        hv[l].z = hv2[t].z;
+        v[l].x = v2[t].x;
+        v[l].y = v2[t].y;
+        v[l].z = v2[t].z;
         const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 
-        //cell_renamed.density[j] = 0.f;
-        cell_renamed.density[j] = tc_orig * densityCoeff;
-        cell_renamed.a[j] = externalAcceleration;
+        density[l] = tc_orig * densityCoeff;
+        a[l] = externalAcceleration;
     }
 } //close RebuildGridMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void InitDensitiesAndForcesMT(Cell *cells, int *cnumPars) {
+__global__ void ComputeDensitiesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *density,  int *cnumPars) {
     int ix = blockIdx.x * blockDim.x + threadIdx.x;
     int iy = blockIdx.y * blockDim.y + threadIdx.y;
     int iz = blockIdx.z * blockDim.z + threadIdx.z;
@@ -632,85 +598,44 @@ __global__ void InitDensitiesAndForcesMT(Cell *cells, int *cnumPars) {
     int index = (iz*ny + iy)*nx + ix;
 
     int np = cnumPars[index];
-
-    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-
-    Cell &cell = cells[index];
-
-    for (int j = 0; j < np; ++j) {
-        cell.density[j] = 0.f;
-        cell.a[j] = externalAcceleration;
-    }
-} //close InitDensitiesAndForcesMT()
-
-////////////////////////////////////////////////////////////////////////////////
-
-__global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    //int nz = blockDim.z * gridDim.z;
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    int np = cnumPars[index];
-
-    //    if (np == 0)  return;
-    //
-    // if np==0 we do net enter the following loop
 
     int neighCells[27];
 
     int numNeighCells = InitNeighCellList(neighCells, cnumPars);
 
-    Cell &cell = cells[index];
-
     for (int j = 0; j < np; ++j) {
         float local_tc = 0;
+        int t = index*PARS_NUM + j;
+
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
-            Cell &neigh = cells[indexNeigh];
-            //if (&cell == &neigh) printf("%d: i found myself\n",index);
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
+                int l = indexNeigh*PARS_NUM + iparNeigh;
 
                 //when i check for (a < b) my neighbor checks for (b > a)
                 //therefore we enter the if statement when (a != b)
 
-                if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
-                    float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
+                if (&p[l] < &p[t]) {
+                    //if (l < t) {
+                    float distSq = (p[t] - p[l]).GetLengthSq();
                     if (distSq < hSq) {
                         float t = hSq - distSq;
                         float tc = t*t*t*densityCoeff;
 
-                        //we are all borders :)
-
-                        //also consider the fact that I am neighbor of my neighbor
-                        //so we both calculate the same tc.
-                        //I can add tc to myself twice, because of that
-                        //and no more need for atomics!
-                        //but I must consider the other particles in my cell
-
-                        atomicAdd(&neigh.density[iparNeigh],tc);
-
+                        atomicAdd(&density[l],tc);
                         local_tc += tc;
-
-                        //cell.density[j] += tc;
                     }
                 }
             }
         }
-        atomicAdd(&cell.density[j],local_tc);
+        atomicAdd(&density[t],local_tc);
     }
 } //close ComputeDensitiesMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void ComputeDensities2MT(Cell *cells, int *cnumPars) {
+__global__ void ComputeForcesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *density,  int *cnumPars) {
     int ix = blockIdx.x * blockDim.x + threadIdx.x;
     int iy = blockIdx.y * blockDim.y + threadIdx.y;
     int iz = blockIdx.z * blockDim.z + threadIdx.z;
@@ -722,98 +647,57 @@ __global__ void ComputeDensities2MT(Cell *cells, int *cnumPars) {
     int index = (iz*ny + iy)*nx + ix;
 
     int np = cnumPars[index];
-
-    //move this computation to cpu
-    //    const float tc_orig = hSq*hSq*hSq;
-
-    Cell &cell = cells[index];
-
-    for (int j = 0; j < np; ++j) {
-        //cell.density[j] += tc_orig;
-        //cell.density[j] *= densityCoeff;
-    }
-} //close ComputeDensities2MT()
-
-////////////////////////////////////////////////////////////////////////////////
-
-__global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    //int nz = blockDim.z * gridDim.z;
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    int np = cnumPars[index];
-
-    //    if (np == 0)  return;
-    //
-    // if np==0 we do net enter the following loop
 
     int neighCells[27];
 
     int numNeighCells = InitNeighCellList(neighCells, cnumPars);
 
-    Cell &cell = cells[index];
-
     for (int j = 0; j < np; ++j) {
         Vec3 local_acc(0,0,0);
+        int t = index*PARS_NUM + j;
+
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
-            Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
+                int l = indexNeigh*PARS_NUM + iparNeigh;
 
                 //when i check for (a < b) my neighbor checks for (b > a)
                 //therefore we enter the if statement when (a != b)
 
-                if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
-                    Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
+                if (&p[l] < &p[t]) {
+                //if (l < t) {
+                    Vec3 disp = p[t] - p[l];
                     float distSq = disp.GetLengthSq();
                     if (distSq < hSq) {
-                        //float dist = sqrtf(std::max(distSq, 1e-12f));
                         float dist = sqrtf(fmax(distSq, 1e-12f));
                         float hmr = h - dist;
 
                         Vec3 acc = disp * pressureCoeff * (hmr*hmr/dist) *
-                            (cell.density[j]+neigh.density[iparNeigh] - doubleRestDensity);
+                            (density[t]+density[l] - doubleRestDensity);
 
-                        acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
-                        acc /= cell.density[j] * neigh.density[iparNeigh];
-
-                        //we are all borders :)
-                        //also consider the fact that I am neighbor of my neighbor
-                        //so when I calculate acc, he calculates -acc
-                        //I can add acc to myself twice, because of that
-                        //but I must consider the other particles in my cell
+                        acc += (v[l] - v[t]) * viscosityCoeff * hmr;
+                        acc /= density[t] * density[l];
 
                         local_acc += acc;
 
-                        atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
-                        atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
-                        atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
-
-                        //cell.a[j].x += acc.x;
-                        //cell.a[j].y += acc.y;
-                        //cell.a[j].z += acc.z;
+                        atomicAdd(&a[l].x,-acc.x);
+                        atomicAdd(&a[l].y,-acc.y);
+                        atomicAdd(&a[l].z,-acc.z);
                     }
                 }
             }
         }
-        atomicAdd(&cell.a[j].x,local_acc.x);
-        atomicAdd(&cell.a[j].y,local_acc.y);
-        atomicAdd(&cell.a[j].z,local_acc.z);
+        atomicAdd(&a[t].x,local_acc.x);
+        atomicAdd(&a[t].y,local_acc.y);
+        atomicAdd(&a[t].z,local_acc.z);
 
     }
 } //close ComputeForcesMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void ProcessCollisionsMT(Cell *cells, int *cnumPars) {
+__global__ void ProcessCollisionsMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *density,  int *cnumPars) {
     int ix = blockIdx.x * blockDim.x + threadIdx.x;
     int iy = blockIdx.y * blockDim.y + threadIdx.y;
     int iz = blockIdx.z * blockDim.z + threadIdx.z;
@@ -833,40 +717,39 @@ __global__ void ProcessCollisionsMT(Cell *cells, int *cnumPars) {
     const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
     const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
-    Cell &cell = cells[index];
-
     for (int j = 0; j < np; ++j) {
-        Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
+        int t = index*PARS_NUM + j;
+        Vec3 pos = p[t] + hv[t] * timeStep;
 
         float diff = parSize - (pos.x - domainMin.x);
         if (diff > epsilon)
-            cell.a[j].x += stiffness*diff - damping*cell.v[j].x;
+            a[t].x += stiffness*diff - damping*v[t].x;
 
         diff = parSize - (domainMax.x - pos.x);
         if (diff > epsilon)
-            cell.a[j].x -= stiffness*diff + damping*cell.v[j].x;
+            a[t].x -= stiffness*diff + damping*v[t].x;
 
         diff = parSize - (pos.y - domainMin.y);
         if (diff > epsilon)
-            cell.a[j].y += stiffness*diff - damping*cell.v[j].y;
+            a[t].y += stiffness*diff - damping*v[t].y;
 
         diff = parSize - (domainMax.y - pos.y);
         if (diff > epsilon)
-            cell.a[j].y -= stiffness*diff + damping*cell.v[j].y;
+            a[t].y -= stiffness*diff + damping*v[t].y;
 
         diff = parSize - (pos.z - domainMin.z);
         if (diff > epsilon)
-            cell.a[j].z += stiffness*diff - damping*cell.v[j].z;
+            a[t].z += stiffness*diff - damping*v[t].z;
 
         diff = parSize - (domainMax.z - pos.z);
         if (diff > epsilon)
-            cell.a[j].z -= stiffness*diff + damping*cell.v[j].z;
+            a[t].z -= stiffness*diff + damping*v[t].z;
     }
 } //close ProcessCollisionsMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void AdvanceParticlesMT(Cell *cells, int *cnumPars) {
+__global__ void AdvanceParticlesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *density,  int *cnumPars) {
     int ix = blockIdx.x * blockDim.x + threadIdx.x;
     int iy = blockIdx.y * blockDim.y + threadIdx.y;
     int iz = blockIdx.z * blockDim.z + threadIdx.z;
@@ -879,14 +762,13 @@ __global__ void AdvanceParticlesMT(Cell *cells, int *cnumPars) {
 
     int np = cnumPars[index];
 
-    Cell &cell = cells[index];
-
     for (int j = 0; j < np; ++j) {
-        Vec3 v_half = cell.hv[j] + cell.a[j]*timeStep;
-        cell.p[j] += v_half * timeStep;
-        cell.v[j] = cell.hv[j] + v_half;
-        cell.v[j] *= 0.5f;
-        cell.hv[j] = v_half;
+        int t = index*PARS_NUM + j;
+        Vec3 v_half = hv[t] + a[t]*timeStep;
+        p[t] += v_half * timeStep;
+        v[t] = hv[t] + v_half;
+        v[t] *= 0.5f;
+        hv[t] = v_half;
     }
 } //close AdvanceParticlesMT()
 
@@ -920,14 +802,13 @@ void call_kernels() {
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
-    ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR("1");
-    RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR("2");
-    //InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("3");
-    ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("4");
-    //ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("5");
-    ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("6");
-    ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
-    AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("8");
+    ClearParticlesMT          <<<grid,block>>>  (cnumPars);                        CUDA_CHECK_ERROR("1");
+    RebuildGridMT             <<<grid,block>>>  (p, hv, v, a,density, cnumPars, \
+                                                 p2,hv2,v2,a,density2,cnumPars2);  CUDA_CHECK_ERROR("2");
+    //ComputeDensitiesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("4");
+    //ComputeForcesMT           <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("6");
+    //ProcessCollisionsMT       <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("7");
+    //AdvanceParticlesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("8");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -957,20 +838,24 @@ int main(int argc, char *argv[]) {
 
     InitSim(argv[3], threadnum);
 
-    //analyse_neighbors();  //debug
-
     //move data to device
-    CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(p2, h_p2, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(hv2, h_hv2, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(v2, h_v2, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(a2, h_a2, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyHostToDevice) );
+    CudaSafeCall( __LINE__, cudaMemcpy(density2, h_density2, numCells * PARS_NUM * sizeof(float), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
-
-    //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
 
     for (int i = 0; i < framenum; ++i) {
         call_kernels();
     }
 
     //move data to host
-    CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_p, p, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_hv, hv, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_v, v, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_a, a, numCells * PARS_NUM * sizeof(Vec3), cudaMemcpyDeviceToHost) );
+    CudaSafeCall( __LINE__, cudaMemcpy(h_density, density, numCells * PARS_NUM * sizeof(float), cudaMemcpyDeviceToHost) );
     CudaSafeCall( __LINE__, cudaMemcpy(h_cnumPars, cnumPars, numCells * sizeof(int), cudaMemcpyDeviceToHost) );
 
     if (argc > 4)
@@ -979,94 +864,4 @@ int main(int argc, char *argv[]) {
     CleanUpSim();
 
     exit(EXIT_SUCCESS);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
-//                          DEBUG CODE
-//
-////////////////////////////////////////////////////////////////////////////////
-
-
-/* Simulate neighbor relations */
-void analyse_neighbors() {
-    grids = new struct Grid[NUM_GRIDS];
-
-    int gi = 0;
-    int sx, sz, ex, ez;
-    ex = 0;
-    for (int i = 0; i < XDIVS; ++i) {
-        sx = ex;
-        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
-        assert(sx < ex);
-
-        ez = 0;
-        for (int j = 0; j < ZDIVS; ++j, ++gi) {
-            sz = ez;
-            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
-            assert(sz < ez);
-
-            grids[gi].sx = sx;
-            grids[gi].ex = ex;
-            grids[gi].sy = 0;
-            grids[gi].ey = ny;
-            grids[gi].sz = sz;
-            grids[gi].ez = ez;
-        }
-    }
-
-    assert(gi == NUM_GRIDS);
-
-    int *symmetry = new int[numCells*27];
-    memset(symmetry,0,numCells*27*sizeof(int));
-    int *snum = new int[numCells];
-    memset(snum,0,numCells*sizeof(int));
-
-    for(int i = 0; i < NUM_GRIDS; ++i) {
-        for(int iz = grids[i].sz; iz < grids[i].ez; ++iz) {
-            for(int iy = grids[i].sy; iy < grids[i].ey; ++iy) {
-                for(int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-                    int sanity = 0;
-                    int index = (iz*ny + iy)*nx + ix;
-                    for(int dk = -1; dk <= 1; ++dk) {
-                        int ck = iz + dk;
-                        if(ck < 0 || ck > (nz-1)) continue;
-                        for(int dj = -1; dj <= 1; ++dj) {
-                            int cj = iy + dj;
-                            if(cj < 0 || cj > (ny-1)) continue;
-                            for(int di = -1; di <= 1; ++di) {
-                                int ci = ix + di;
-                                if(ci < 0 || ci > (nx-1)) continue;
-
-                                if (h_cnumPars2[index] != 0) {
-                                    int sindex = (ck*ny + cj)*nx + ci;
-                                    symmetry[index*27+(snum[index]++)] = sindex;
-                                    sanity++;
-                                }
-                            }
-                        }
-                    }
-                    assert(sanity<=27);
-                }
-            }
-        }
-    }
-
-    delete[] grids;
-
-    printf("debug: neighbor status (good : bad)\n");
-    for (int i=0; i<numCells; i++) {
-        bool alone = true;
-        for (int j=0; j<27; j++) {
-            if (j>=snum[i]) break;
-            for (int k=0; k<27; k++) {
-                if (k>=snum[symmetry[27*i+j]]) break;
-                if (i==symmetry[symmetry[27*i+j]*27+k]) alone = false;
-            }
-            if (alone) printf("debug: %d : %d\n",i,symmetry[27*i+j]);
-        }
-    }
-
-    delete[] symmetry;
-    delete[] snum;
 }
