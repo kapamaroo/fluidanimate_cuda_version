@@ -22,7 +22,7 @@ echo "#"
 echo "# CPU Test"
 echo "#"
 
-#time ./$BUILDDIR/$CPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
+time ./$BUILDDIR/$CPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
 
 echo "#"
 echo "# GPU Test"
