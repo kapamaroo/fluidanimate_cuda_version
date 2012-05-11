@@ -61,8 +61,6 @@ static inline int bswap_int32(int x) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// note: icc-optimized version of this class gave 15% more
-// performance than our hand-optimized SSE3 implementation
 class Vec3 {
 public:
     float x, y, z;
@@ -142,10 +140,6 @@ int *h_cnumPars = 0;
 
 Cell *h_cells2 = 0;
 int *h_cnumPars2 = 0;
-
-// flags which cells lie on grid boundaries
-//bool *h_border;
-//bool *border;
 
 int nx;
 int ny;
@@ -268,64 +262,6 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
 
-    /*
-    grids = new struct Grid[NUM_GRIDS];
-
-    int gi = 0;
-    int sx, sz, ex, ez;
-    ex = 0;
-    for (int i = 0; i < XDIVS; ++i) {
-        sx = ex;
-        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
-        assert(sx < ex);
-
-        ez = 0;
-        for (int j = 0; j < ZDIVS; ++j, ++gi) {
-            sz = ez;
-            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
-            assert(sz < ez);
-
-            grids[gi].sx = sx;
-            grids[gi].ex = ex;
-            grids[gi].sy = 0;
-            grids[gi].ey = ny;
-            grids[gi].sz = sz;
-            grids[gi].ez = ez;
-        }
-    }
-
-    assert(gi == NUM_GRIDS);
-
-    h_border = new bool[numCells];
-    assert(h_border);
-
-    for (int i = 0; i < NUM_GRIDS; ++i)
-        for (int iz = grids[i].sz; iz < grids[i].ez; ++iz)
-            for (int iy = grids[i].sy; iy < grids[i].ey; ++iy)
-                for (int ix = grids[i].sx; ix < grids[i].ex; ++ix)
-                    {
-                        int index = (iz*ny + iy)*nx + ix;
-                        h_border[index] = false;
-                        for (int dk = -1; dk <= 1; ++dk)
-                            for (int dj = -1; dj <= 1; ++dj)
-                                for (int di = -1; di <= 1; ++di)
-                                    {
-                                        int ci = ix + di;
-                                        int cj = iy + dj;
-                                        int ck = iz + dk;
-
-                                        if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
-                                        if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
-                                        if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
-
-                                        if ( ci < grids[i].sx || ci >= grids[i].ex ||
-                                            cj < grids[i].sy || cj >= grids[i].ey ||
-                                            ck < grids[i].sz || ck >= grids[i].ez )
-                                            h_border[index] = true;
-                                    }
-                    }
-    */
-
     h_cells = new Cell[numCells];
     h_cnumPars = new int[numCells];
 
@@ -338,13 +274,10 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cells2, numCells * sizeof(struct Cell)) );
     CudaSafeCall( __LINE__, cudaMalloc((void**)&cnumPars2, numCells * sizeof(int)) );
 
-    //CudaSafeCall( __LINE__, cudaMalloc((void**)&border, numCells * sizeof(bool)) );
-
     assert(h_cells && h_cnumPars);
     assert(h_cells2 && h_cnumPars2);
     assert(cells && cnumPars);
     assert(cells2 && cnumPars2);
-    //assert(border);
 
     memset(h_cnumPars2, 0, numCells*sizeof(int));
 
@@ -423,9 +356,6 @@ void SaveFile(char const *fileName) {
         file.write((char *)&origNumParticles,      4);
     }
 
-    //memcpy(h_cells,    h_cells2,    numCells * sizeof(struct Cell));
-    //memcpy(h_cnumPars, h_cnumPars2, numCells * sizeof(int));
-
     int count = 0;
     for (int i = 0; i < numCells; ++i) {
         Cell const &cell = h_cells[i];
@@ -492,9 +422,6 @@ void SaveFile(char const *fileName) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void CleanUpSim() {
-    //delete[] h_border;
-    //delete[] grids;
-
     delete[] h_cells;
     delete[] h_cnumPars;
 
@@ -506,8 +433,6 @@ void CleanUpSim() {
 
     CudaSafeCall( __LINE__, cudaFree(cells2) );
     CudaSafeCall( __LINE__, cudaFree(cnumPars2) );
-
-    //CudaSafeCall( __LINE__, cudaFree(border) );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -535,7 +460,6 @@ __device__ int InitNeighCellList(int *neighCells, int *cnumPars) {
                     int index = (kk*ny + jj)*nx + ii;
 
                     //consider only cell neighbors who actually have particles
-
                     if (cnumPars[index] != 0) {
                         neighCells[numNeighCells] = index;
                         ++numNeighCells;
@@ -592,13 +516,7 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
         if (ck < 0) ck = 0; else if (ck > (nz-1)) ck = nz-1;
 
         int index2 = (ck*ny + cj)*nx + ci;
-        // this assumes that particles cannot travel more than one grid cell per time step
-
         int np_renamed = atomicAdd(&cnumPars[index2],1);
-
-        //#warning what if we exceed PARS_NUM particles per cell here??
-        //from what I see is that we calculate the same frame over and over
-        //so every cell has at most PARS_NUM particles, from the initialisation
 
         Cell &cell_renamed = cells[index2];
         cell_renamed.p[np_renamed].x = cell2.p[j].x;
@@ -612,36 +530,10 @@ __global__ void RebuildGridMT(Cell *cells, int *cnumPars,Cell *cells2, int *cnum
         cell_renamed.v[np_renamed].z = cell2.v[j].z;
         const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
 
-        //cell_renamed.density[j] = 0.f;
         cell_renamed.density[j] = tc_orig * densityCoeff;
         cell_renamed.a[j] = externalAcceleration;
     }
 } //close RebuildGridMT()
-
-////////////////////////////////////////////////////////////////////////////////
-
-__global__ void InitDensitiesAndForcesMT(Cell *cells, int *cnumPars) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    //int nz = blockDim.z * gridDim.z;
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    int np = cnumPars[index];
-
-    const Vec3 externalAcceleration(0.f, -9.8f, 0.f);
-
-    Cell &cell = cells[index];
-
-    for (int j = 0; j < np; ++j) {
-        cell.density[j] = 0.f;
-        cell.a[j] = externalAcceleration;
-    }
-} //close InitDensitiesAndForcesMT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -655,17 +547,9 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
     //int nz = blockDim.z * gridDim.z;
 
     int index = (iz*ny + iy)*nx + ix;
-
     int np = cnumPars[index];
-
-    //    if (np == 0)  return;
-    //
-    // if np==0 we do net enter the following loop
-
     int neighCells[27];
-
     int numNeighCells = InitNeighCellList(neighCells, cnumPars);
-
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
@@ -673,33 +557,15 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             Cell &neigh = cells[indexNeigh];
-            //if (&cell == &neigh) printf("%d: i found myself\n",index);
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
-
-                //when i check for (a < b) my neighbor checks for (b > a)
-                //therefore we enter the if statement when (a != b)
-
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
                     float distSq = (cell.p[j] - neigh.p[iparNeigh]).GetLengthSq();
                     if (distSq < hSq) {
                         float t = hSq - distSq;
                         float tc = t*t*t*densityCoeff;
-
-                        //we are all borders :)
-
-                        //also consider the fact that I am neighbor of my neighbor
-                        //so we both calculate the same tc.
-                        //I can add tc to myself twice, because of that
-                        //and no more need for atomics!
-                        //but I must consider the other particles in my cell
-
                         atomicAdd(&neigh.density[iparNeigh],tc);
-
                         local_tc += tc;
-
-                        //cell.density[j] += tc;
                     }
                 }
             }
@@ -707,32 +573,6 @@ __global__ void ComputeDensitiesMT(Cell *cells, int *cnumPars) {
         atomicAdd(&cell.density[j],local_tc);
     }
 } //close ComputeDensitiesMT()
-
-////////////////////////////////////////////////////////////////////////////////
-
-__global__ void ComputeDensities2MT(Cell *cells, int *cnumPars) {
-    int ix = blockIdx.x * blockDim.x + threadIdx.x;
-    int iy = blockIdx.y * blockDim.y + threadIdx.y;
-    int iz = blockIdx.z * blockDim.z + threadIdx.z;
-
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-    //int nz = blockDim.z * gridDim.z;
-
-    int index = (iz*ny + iy)*nx + ix;
-
-    int np = cnumPars[index];
-
-    //move this computation to cpu
-    //    const float tc_orig = hSq*hSq*hSq;
-
-    Cell &cell = cells[index];
-
-    for (int j = 0; j < np; ++j) {
-        //cell.density[j] += tc_orig;
-        //cell.density[j] *= densityCoeff;
-    }
-} //close ComputeDensities2MT()
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -746,17 +586,9 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
     //int nz = blockDim.z * gridDim.z;
 
     int index = (iz*ny + iy)*nx + ix;
-
     int np = cnumPars[index];
-
-    //    if (np == 0)  return;
-    //
-    // if np==0 we do net enter the following loop
-
     int neighCells[27];
-
     int numNeighCells = InitNeighCellList(neighCells, cnumPars);
-
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
@@ -766,16 +598,10 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
             Cell &neigh = cells[indexNeigh];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
-
-                //when i check for (a < b) my neighbor checks for (b > a)
-                //therefore we enter the if statement when (a != b)
-
                 if (&neigh.p[iparNeigh] < &cell.p[j]) {
-                //if (&neigh.p[iparNeigh] != &cell.p[j]) {
                     Vec3 disp = cell.p[j] - neigh.p[iparNeigh];
                     float distSq = disp.GetLengthSq();
                     if (distSq < hSq) {
-                        //float dist = sqrtf(std::max(distSq, 1e-12f));
                         float dist = sqrtf(fmax(distSq, 1e-12f));
                         float hmr = h - dist;
 
@@ -785,21 +611,10 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
                         acc += (neigh.v[iparNeigh] - cell.v[j]) * viscosityCoeff * hmr;
                         acc /= cell.density[j] * neigh.density[iparNeigh];
 
-                        //we are all borders :)
-                        //also consider the fact that I am neighbor of my neighbor
-                        //so when I calculate acc, he calculates -acc
-                        //I can add acc to myself twice, because of that
-                        //but I must consider the other particles in my cell
-
                         local_acc += acc;
-
                         atomicAdd(&neigh.a[iparNeigh].x,-acc.x);
                         atomicAdd(&neigh.a[iparNeigh].y,-acc.y);
                         atomicAdd(&neigh.a[iparNeigh].z,-acc.z);
-
-                        //cell.a[j].x += acc.x;
-                        //cell.a[j].y += acc.y;
-                        //cell.a[j].z += acc.z;
                     }
                 }
             }
@@ -914,25 +729,19 @@ void call_kernels() {
     block_y = ny;
     block_z = nz / ZDIVS;
 
-    //printf("grid (%d,% d, %d), block (%d, %d, %d)\n",grid_x,grid_y,grid_z,block_x,block_y,block_z);
-
     //kernel stuff
     dim3 grid(grid_x, grid_y, grid_z);
     dim3 block(block_x, block_y, block_z);
 
     ClearParticlesMT          <<<grid,block>>>  (cnumPars);                                  CUDA_CHECK_ERROR("1");
     RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR("2");
-    //InitDensitiesAndForcesMT  <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("3");
     ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("4");
-    //ComputeDensities2MT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("5");
     ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("6");
     ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
     AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("8");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-void analyse_neighbors();
 
 int main(int argc, char *argv[]) {
     if (argc < 4 || argc >= 6) {
@@ -957,17 +766,12 @@ int main(int argc, char *argv[]) {
 
     InitSim(argv[3], threadnum);
 
-    //analyse_neighbors();  //debug
-
     //move data to device
     CudaSafeCall( __LINE__, cudaMemcpy(cells2, h_cells2, numCells * sizeof(struct Cell), cudaMemcpyHostToDevice) );
     CudaSafeCall( __LINE__, cudaMemcpy(cnumPars2, h_cnumPars2, numCells * sizeof(int), cudaMemcpyHostToDevice) );
 
-    //CudaSafeCall( __LINE__, cudaMemcpy(border, h_border, numCells * sizeof(bool), cudaMemcpyHostToDevice) );
-
-    for (int i = 0; i < framenum; ++i) {
+    for (int i = 0; i < framenum; ++i)
         call_kernels();
-    }
 
     //move data to host
     CudaSafeCall( __LINE__, cudaMemcpy(h_cells, cells, numCells * sizeof(struct Cell), cudaMemcpyDeviceToHost) );
@@ -979,94 +783,4 @@ int main(int argc, char *argv[]) {
     CleanUpSim();
 
     exit(EXIT_SUCCESS);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-//
-//                          DEBUG CODE
-//
-////////////////////////////////////////////////////////////////////////////////
-
-
-/* Simulate neighbor relations */
-void analyse_neighbors() {
-    grids = new struct Grid[NUM_GRIDS];
-
-    int gi = 0;
-    int sx, sz, ex, ez;
-    ex = 0;
-    for (int i = 0; i < XDIVS; ++i) {
-        sx = ex;
-        ex = int(float(nx)/float(XDIVS) * (i+1) + 0.5f);
-        assert(sx < ex);
-
-        ez = 0;
-        for (int j = 0; j < ZDIVS; ++j, ++gi) {
-            sz = ez;
-            ez = int(float(nz)/float(ZDIVS) * (j+1) + 0.5f);
-            assert(sz < ez);
-
-            grids[gi].sx = sx;
-            grids[gi].ex = ex;
-            grids[gi].sy = 0;
-            grids[gi].ey = ny;
-            grids[gi].sz = sz;
-            grids[gi].ez = ez;
-        }
-    }
-
-    assert(gi == NUM_GRIDS);
-
-    int *symmetry = new int[numCells*27];
-    memset(symmetry,0,numCells*27*sizeof(int));
-    int *snum = new int[numCells];
-    memset(snum,0,numCells*sizeof(int));
-
-    for(int i = 0; i < NUM_GRIDS; ++i) {
-        for(int iz = grids[i].sz; iz < grids[i].ez; ++iz) {
-            for(int iy = grids[i].sy; iy < grids[i].ey; ++iy) {
-                for(int ix = grids[i].sx; ix < grids[i].ex; ++ix) {
-                    int sanity = 0;
-                    int index = (iz*ny + iy)*nx + ix;
-                    for(int dk = -1; dk <= 1; ++dk) {
-                        int ck = iz + dk;
-                        if(ck < 0 || ck > (nz-1)) continue;
-                        for(int dj = -1; dj <= 1; ++dj) {
-                            int cj = iy + dj;
-                            if(cj < 0 || cj > (ny-1)) continue;
-                            for(int di = -1; di <= 1; ++di) {
-                                int ci = ix + di;
-                                if(ci < 0 || ci > (nx-1)) continue;
-
-                                if (h_cnumPars2[index] != 0) {
-                                    int sindex = (ck*ny + cj)*nx + ci;
-                                    symmetry[index*27+(snum[index]++)] = sindex;
-                                    sanity++;
-                                }
-                            }
-                        }
-                    }
-                    assert(sanity<=27);
-                }
-            }
-        }
-    }
-
-    delete[] grids;
-
-    printf("debug: neighbor status (good : bad)\n");
-    for (int i=0; i<numCells; i++) {
-        bool alone = true;
-        for (int j=0; j<27; j++) {
-            if (j>=snum[i]) break;
-            for (int k=0; k<27; k++) {
-                if (k>=snum[symmetry[27*i+j]]) break;
-                if (i==symmetry[symmetry[27*i+j]*27+k]) alone = false;
-            }
-            if (alone) printf("debug: %d : %d\n",i,symmetry[27*i+j]);
-        }
-    }
-
-    delete[] symmetry;
-    delete[] snum;
 }
