@@ -623,6 +623,7 @@ __global__ void ComputeForcesMT(Cell *cells, int *cnumPars) {
         atomicAdd(&cell.a[j].y,local_acc.y);
         atomicAdd(&cell.a[j].z,local_acc.z);
 
+        /*
     }
 } //close ComputeForcesMT()
 
@@ -640,6 +641,7 @@ __global__ void ProcessCollisionsMT(Cell *cells, int *cnumPars) {
     int index = (iz*ny + iy)*nx + ix;
 
     int np = cnumPars[index];
+        */
 
     const float parSize = 0.0002f;
     const float epsilon = 1e-10f;
@@ -648,9 +650,11 @@ __global__ void ProcessCollisionsMT(Cell *cells, int *cnumPars) {
     const Vec3 domainMin(-0.065f, -0.08f, -0.065f);
     const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
+    /*
     Cell &cell = cells[index];
 
     for (int j = 0; j < np; ++j) {
+    */
         Vec3 pos = cell.p[j] + cell.hv[j] * timeStep;
 
         float diff = parSize - (pos.x - domainMin.x);
@@ -737,7 +741,7 @@ void call_kernels() {
     RebuildGridMT             <<<grid,block>>>  (cells,cnumPars,cells2,cnumPars2);           CUDA_CHECK_ERROR("2");
     ComputeDensitiesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("4");
     ComputeForcesMT           <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("6");
-    ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
+    //ProcessCollisionsMT       <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("7");
     AdvanceParticlesMT        <<<grid,block>>>  (cells,cnumPars);                            CUDA_CHECK_ERROR("8");
 }
 
