@@ -813,8 +813,6 @@ void call_kernels() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void analyse_neighbors();
-
 int main(int argc, char *argv[]) {
     if (argc < 4 || argc >= 6) {
         std::cout << "Usage: " << argv[0] << " <threadnum> <framenum> <.fluid input file> [.fluid output file]" << std::endl;
