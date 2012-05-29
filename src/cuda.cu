@@ -548,9 +548,9 @@ __global__ void RebuildGridMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *de
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
         int t = index*PARS_NUM + j;
-        int ci = (int)((p[t].x - domainMin.x) / delta.x);
-        int cj = (int)((p[t].y - domainMin.y) / delta.y);
-        int ck = (int)((p[t].z - domainMin.z) / delta.z);
+        int ci = (int)((p2[t].x - domainMin.x) / delta.x);
+        int cj = (int)((p2[t].y - domainMin.y) / delta.y);
+        int ck = (int)((p2[t].z - domainMin.z) / delta.z);
 
         if (ci < 0) ci = 0; else if (ci > (nx-1)) ci = nx-1;
         if (cj < 0) cj = 0; else if (cj > (ny-1)) cj = ny-1;
@@ -559,7 +559,7 @@ __global__ void RebuildGridMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *de
         int index2 = (ck*ny + cj)*nx + ci;
         // this assumes that particles cannot travel more than one grid cell per time step
 
-        assert(index==index2);
+        //assert(index==index2);
 
         int offset = atomicAdd(&cnumPars[index2],1);
 
@@ -805,10 +805,10 @@ void call_kernels() {
     ClearParticlesMT          <<<grid,block>>>  (cnumPars);                        CUDA_CHECK_ERROR("1");
     RebuildGridMT             <<<grid,block>>>  (p, hv, v, a,density, cnumPars, \
                                                  p2,hv2,v2,a,density2,cnumPars2);  CUDA_CHECK_ERROR("2");
-    //ComputeDensitiesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("4");
-    //ComputeForcesMT           <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("6");
-    //ProcessCollisionsMT       <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("7");
-    //AdvanceParticlesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("8");
+    ComputeDensitiesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("4");
+    ComputeForcesMT           <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("6");
+    ProcessCollisionsMT       <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("7");
+    AdvanceParticlesMT        <<<grid,block>>>  (p,hv,v,a,density,cnumPars);       CUDA_CHECK_ERROR("8");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
