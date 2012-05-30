@@ -136,6 +136,7 @@ float restParticlesPerMeter;
 __device__ float h;
 __device__ float hSq;
 __device__ float tc_orig;
+__device__ int _numCells;
 
 __device__ float densityCoeff;
 __device__ float pressureCoeff;
@@ -266,6 +267,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("viscosityCoeff", &h_viscosityCoeff, sizeof(float), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("delta", &h_delta, sizeof(Vec3), 0, cudaMemcpyHostToDevice) );
     CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("tc_orig", &h_tc_orig, sizeof(float), 0, cudaMemcpyHostToDevice) );
+    CudaSafeCall ( __LINE__, cudaMemcpyToSymbol("_numCells", &numCells, sizeof(int), 0, cudaMemcpyHostToDevice) );
 
     h_p = new Vec3[numCells*PARS_NUM];
     h_hv = new Vec3[numCells*PARS_NUM];
@@ -336,7 +338,7 @@ void InitSim(char const *fileName, unsigned int threadnum) {
         int index = (ck*ny + cj)*nx + ci;
         int np = h_cnumPars2[index];
 
-        int t = index*PARS_NUM + np;
+        int t = index + np*numCells;
 
         if (np < PARS_NUM) {
             h_p2[t].x = px;
@@ -382,18 +384,20 @@ void SaveFile(char const *fileName) {
     for (int i = 0; i < numCells; ++i) {
         int np = h_cnumPars[i];
         for (int j = 0; j < np; ++j) {
+            int l = i + j*numCells;
+
             if (!isLittleEndian()) {
                 float px, py, pz, hvx, hvy, hvz, vx,vy, vz;
 
-                px  = bswap_float(h_p[i*PARS_NUM + j].x);
-                py  = bswap_float(h_p[i*PARS_NUM + j].y);
-                pz  = bswap_float(h_p[i*PARS_NUM + j].z);
-                hvx = bswap_float(h_hv[i*PARS_NUM + j].x);
-                hvy = bswap_float(h_hv[i*PARS_NUM + j].y);
-                hvz = bswap_float(h_hv[i*PARS_NUM + j].z);
-                vx  = bswap_float(h_v[i*PARS_NUM + j].x);
-                vy  = bswap_float(h_v[i*PARS_NUM + j].y);
-                vz  = bswap_float(h_v[i*PARS_NUM + j].z);
+                px  = bswap_float(h_p[l].x);
+                py  = bswap_float(h_p[l].y);
+                pz  = bswap_float(h_p[l].z);
+                hvx = bswap_float(h_hv[l].x);
+                hvy = bswap_float(h_hv[l].y);
+                hvz = bswap_float(h_hv[l].z);
+                vx  = bswap_float(h_v[l].x);
+                vy  = bswap_float(h_v[l].y);
+                vz  = bswap_float(h_v[l].z);
 
                 file.write((char *)&px,  4);
                 file.write((char *)&py,  4);
@@ -405,15 +409,15 @@ void SaveFile(char const *fileName) {
                 file.write((char *)&vy,  4);
                 file.write((char *)&vz,  4);
             } else {
-                file.write((char *)&h_p[i*PARS_NUM + j].x,  4);
-                file.write((char *)&h_p[i*PARS_NUM + j].y,  4);
-                file.write((char *)&h_p[i*PARS_NUM + j].z,  4);
-                file.write((char *)&h_hv[i*PARS_NUM + j].x, 4);
-                file.write((char *)&h_hv[i*PARS_NUM + j].y, 4);
-                file.write((char *)&h_hv[i*PARS_NUM + j].z, 4);
-                file.write((char *)&h_v[i*PARS_NUM + j].x,  4);
-                file.write((char *)&h_v[i*PARS_NUM + j].y,  4);
-                file.write((char *)&h_v[i*PARS_NUM + j].z,  4);
+                file.write((char *)&h_p[l].x,  4);
+                file.write((char *)&h_p[l].y,  4);
+                file.write((char *)&h_p[l].z,  4);
+                file.write((char *)&h_hv[l].x, 4);
+                file.write((char *)&h_hv[l].y, 4);
+                file.write((char *)&h_hv[l].z, 4);
+                file.write((char *)&h_v[l].x,  4);
+                file.write((char *)&h_v[l].y,  4);
+                file.write((char *)&h_v[l].z,  4);
             }
             ++count;
         }
@@ -547,7 +551,7 @@ __global__ void RebuildGridMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *de
 
     int np2 = cnumPars2[index];
     for (int j = 0; j < np2; ++j) {
-        int t = index*PARS_NUM + j;
+        int t = index + j*_numCells;
         int ci = (int)((p2[t].x - domainMin.x) / delta.x);
         int cj = (int)((p2[t].y - domainMin.y) / delta.y);
         int ck = (int)((p2[t].z - domainMin.z) / delta.z);
@@ -567,7 +571,7 @@ __global__ void RebuildGridMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *de
         //from what I see is that we calculate the same frame over and over
         //so every cell has at most PARS_NUM particles, from the initialisation
 
-        int l = index2*PARS_NUM + offset;
+        int l = index2 + offset*_numCells;
         p[l].x = p2[t].x;
         p[l].y = p2[t].y;
         p[l].z = p2[t].z;
@@ -605,13 +609,13 @@ __global__ void ComputeDensitiesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  floa
 
     for (int j = 0; j < np; ++j) {
         float local_tc = 0;
-        int t = index*PARS_NUM + j;
+        int t = index + j*_numCells;
 
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
-                int l = indexNeigh*PARS_NUM + iparNeigh;
+                int l = indexNeigh + iparNeigh*_numCells;
 
                 //when i check for (a < b) my neighbor checks for (b > a)
                 //therefore we enter the if statement when (a != b)
@@ -654,13 +658,13 @@ __global__ void ComputeForcesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  float *
 
     for (int j = 0; j < np; ++j) {
         Vec3 local_acc(0,0,0);
-        int t = index*PARS_NUM + j;
+        int t = index + j*_numCells;
 
         for (int inc = 0; inc < numNeighCells; ++inc) {
             int indexNeigh = neighCells[inc];
             int numNeighPars = cnumPars[indexNeigh];
             for (int iparNeigh = 0; iparNeigh < numNeighPars; ++iparNeigh) {
-                int l = indexNeigh*PARS_NUM + iparNeigh;
+                int l = indexNeigh + iparNeigh*_numCells;
 
                 //when i check for (a < b) my neighbor checks for (b > a)
                 //therefore we enter the if statement when (a != b)
@@ -718,7 +722,7 @@ __global__ void ProcessCollisionsMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  flo
     const Vec3 domainMax(0.065f, 0.1f, 0.065f);
 
     for (int j = 0; j < np; ++j) {
-        int t = index*PARS_NUM + j;
+        int t = index + j*_numCells;
         Vec3 pos = p[t] + hv[t] * timeStep;
 
         float diff = parSize - (pos.x - domainMin.x);
@@ -763,7 +767,7 @@ __global__ void AdvanceParticlesMT(Vec3 *p,  Vec3 *hv,  Vec3 *v,  Vec3 *a,  floa
     int np = cnumPars[index];
 
     for (int j = 0; j < np; ++j) {
-        int t = index*PARS_NUM + j;
+        int t = index + j*_numCells;
         Vec3 v_half = hv[t] + a[t]*timeStep;
         p[t] += v_half * timeStep;
         v[t] = hv[t] + v_half;
