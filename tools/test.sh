@@ -2,13 +2,15 @@
 
 BUILDDIR="bin"
 LOGDIR="log"
+LOGFILE="benchmark.log"
 
 CPU_BIN="fluidanimate_cpu"
 GPU_BIN="fluidanimate_gpu"
 
 CHECK_BIN="./tools/checkfiles"
 
-THREADS="256"
+CPU_THREADS="8"
+GPU_THREADS="256"
 FRAMES="$@"
 
 INPUT="inputs/in_100K.fluid"
@@ -25,13 +27,18 @@ echo
 echo "############### CPU Test #####################"
 echo
 
-time ./$BUILDDIR/$CPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
+for i in 1 2 4 8; do
+    echo "$i threads"
+    #command time -f '%e' -a -o $LOGFILE ./$BUILDDIR/$CPU_BIN $i $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
+    time ./$BUILDDIR/$CPU_BIN $i $FRAMES ./$INPUT ./$LOGDIR/$CPU_OUTPUT
+    echo
+done
 
 echo
 echo "############### GPU Test #####################"
 echo
 
-time ./$BUILDDIR/$GPU_BIN $THREADS $FRAMES ./$INPUT ./$LOGDIR/$GPU_OUTPUT
+time ./$BUILDDIR/$GPU_BIN $GPU_THREADS $FRAMES ./$INPUT ./$LOGDIR/$GPU_OUTPUT
 
 echo
 echo "############ Compare Results #################"

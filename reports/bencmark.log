@@ -1,0 +1,66 @@
+
+######## Start Test for 1024 frames #############
+
+############### CPU Test #####################
+
+1 threads
+PARSEC Benchmark Suite
+Loading file "./inputs/in_100K.fluid"...
+Number of cells: 46080
+Number of particles: 102850 (0 skipped)
+Saving file "./log/out_100K_cpu.fluid"...
+
+real    2m12.670s
+user    2m12.100s
+sys     0m0.030s
+
+2 threads
+PARSEC Benchmark Suite
+Loading file "./inputs/in_100K.fluid"...
+Number of cells: 46080
+Number of particles: 102850 (0 skipped)
+Saving file "./log/out_100K_cpu.fluid"...
+
+real    1m13.262s
+user    2m20.700s
+sys     0m0.070s
+
+4 threads
+PARSEC Benchmark Suite
+Loading file "./inputs/in_100K.fluid"...
+Number of cells: 46080
+Number of particles: 102850 (0 skipped)
+Saving file "./log/out_100K_cpu.fluid"...
+
+real    0m43.427s
+user    2m41.340s
+sys     0m0.160s
+
+8 threads
+PARSEC Benchmark Suite
+Loading file "./inputs/in_100K.fluid"...
+Number of cells: 46080
+Number of particles: 102850 (0 skipped)
+Saving file "./log/out_100K_cpu.fluid"...
+
+real    0m36.267s
+user    4m27.640s
+sys     0m0.390s
+
+
+############### GPU Test #####################
+
+Loading file "./inputs/in_100K.fluid"...
+Number of cells: 46080
+Number of particles: 102850 (0 skipped)
+Saving file "./log/out_100K_gpu.fluid"...
+
+real    0m19.655s
+user    0m8.360s
+sys     0m11.070s
+
+############ Compare Results #################
+Tolerance: 1e-05
+Files match.
+
+############## Test Finished #################
